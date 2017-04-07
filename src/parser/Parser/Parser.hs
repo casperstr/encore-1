@@ -766,16 +766,21 @@ mutModifier :: EncParser Mutability
 mutModifier = (reserved "var" >> return Var)
           <|> (reserved "val" >> return Val)
 
+
 fieldDecl :: EncParser FieldDecl
 fieldDecl = do fmeta <- meta <$> getPosition
                fmut  <- mutModifier
                fname <- Name <$> identifier
                colon
                ftype <- typ
+               optional $ withLinebreaks $ reservedOp "="
+               fexpr <- optional expression
                return Field{fmeta
                            ,fmut
                            ,fname
-                           ,ftype}
+                           ,ftype
+                           ,fexpr
+                         }
 
 paramDecl :: EncParser ParamDecl
 paramDecl = do
