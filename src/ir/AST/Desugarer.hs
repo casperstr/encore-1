@@ -14,7 +14,7 @@ desugarProgram :: Program -> Program
 desugarProgram p@(Program{traits, classes, functions}) =
   p{
     traits = map desugarTrait traits,
-    classes = map desugarClass classes,
+    classes = map desugarClass  classes,
     functions = map desugarFunction functions
   }
   where
@@ -55,6 +55,13 @@ desugarProgram p@(Program{traits, classes, functions}) =
 
     desugarClass c@(Class{cmethods})
       | isPassive c || isShared c = c{cmethods = map desugarMethod cmethods}
+
+    desugarClassParam c@(Class{cmethods, cfields}) = c{cmethods = map (\e-> (desugarClassParams e c)) (cmethods)}
+
+    -- TODO: this method should append default field values at the begining of the constructor method
+    desugarClassParams m@(Method {mbody, mlocals}) c@(Class{cmethods, cfields}) | isConstructor m = m
+
+    desugarClassParams m@(Method {mbody, mlocals}) c@(Class{cmethods, cfields}) = m
 
     desugarMethod m@(Method {mbody, mlocals}) =
       m{mbody = desugarExpr mbody
