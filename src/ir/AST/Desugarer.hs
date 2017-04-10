@@ -59,9 +59,19 @@ desugarProgram p@(Program{traits, classes, functions}) =
     desugarClassParam c@(Class{cmethods, cfields}) = c{cmethods = map (\e-> (desugarClassParams e c)) (cmethods)}
 
     -- TODO: this method should append default field values at the begining of the constructor method
-    desugarClassParams m@(Method {mbody, mlocals}) c@(Class{cmethods, cfields}) | isConstructor m = m
+    desugarClassParams m@(Method {mbody, mlocals}) c@(Class{cmeta, cmethods, cfields}) | isConstructor m = m{mbody = Seq{
+      emeta= Meta.meta (Meta.sourcePos cmeta),
+      eseq= map (\e -> paramFieldAcces e) cfields
+    }}
+
 
     desugarClassParams m@(Method {mbody, mlocals}) c@(Class{cmethods, cfields}) = m
+
+    targetForParam ex meta
+      | (Just ex) _ = ex
+      | Nothing meta = Skip {emeta=meta}
+
+    paramFieldAcces e = FieldAccess{emeta=Meta.meta (Meta.sourcePos cmeta), name=(fname e), target=(targetForParam (fexpr e) (Meta.meta (Meta.sourcePos cmeta)) )}
 
     desugarMethod m@(Method {mbody, mlocals}) =
       m{mbody = desugarExpr mbody
