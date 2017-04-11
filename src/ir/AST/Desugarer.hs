@@ -15,7 +15,7 @@ desugarProgram :: Program -> Program
 desugarProgram p@(Program{traits, classes, functions}) =
   p{
     traits = map desugarTrait traits,
-    classes = map (desugarClass . desugarClassParam) classes,
+    classes = map (desugarClass . desugarClassParams) classes,
     functions = map desugarFunction functions
   }
   where
@@ -57,25 +57,23 @@ desugarProgram p@(Program{traits, classes, functions}) =
     desugarClass c@(Class{cmethods})
       | isPassive c || isShared c = c{cmethods = map desugarMethod cmethods}
 
-      -- Blir kallad på varje  klass. Går igenom varje metod på klassen och kallar desugarClassParams
-    desugarClassParam c@(Class{cmethods, cfields}) = c{cmethods = map (desugarClassParams c) cmethods}
+      -- Desugar default paramater fields into assignments in the construcor
+    desugarClassParams c@(Class{cmethods, cfields}) = c{cmethods = map (desugarClassParamsMethod c) cmethods}
 
-    -- Blir kallad på varje metod i varje klass.
-    -- Om metoden är konstruktor så  lägger den till en sekvens i början på metoden. Varje steg i sekvensen fås av paramFieldAcces.
-    desugarClassParams  c@(Class{cmeta, cmethods, cfields}) m@(Method {mbody, mlocals}) | isConstructor m = m{mbody = Seq{
-        emeta= Meta.meta (Meta.sourcePos cmeta),
-        eseq= (map paramFieldAcces $ List.filter (isJust . fexpr) cfields) ++ [mbody]
-      }}
-    desugarClassParams  c@(Class{cmeta, cmethods, cfields}) m@(Method {mbody, mlocals}) = m
+    desugarClassParamsMethod  c@(Class{cmeta, cmethods, cfields}) m@(Method {mbody, mlocals})
+      | isConstructor m = m{mbody = Seq{
+          emeta= Meta.meta (Meta.sourcePos cmeta),
+          eseq= (map paramFieldAssignment $ List.filter (isJust . fexpr) cfields) ++ [mbody]
+        }}
+        where
+          paramFieldAssignment field = Assign {emeta=Meta.meta . Meta.sourcePos . fmeta $ field
+                                      ,rhs=fromJust . fexpr $ field
+                                      ,lhs=FieldAccess{emeta=Meta.meta. Meta.sourcePos . fmeta $ field
+                                                      ,name=(fname field)
+                                                      ,target=VarAccess {emeta=Meta.meta . Meta.sourcePos . fmeta $ field
+                                                                        ,qname=qName "this"}}}
+    desugarClassParamsMethod _ m = m
 
-    -- Genererar ett expression för varje parameter
-    -- exempelvis: this.lastName = "hej"
-    paramFieldAcces e = Assign {emeta=Meta.meta . Meta.sourcePos . fmeta $ e
-                                ,lhs=FieldAccess{emeta=Meta.meta. Meta.sourcePos . fmeta $ e
-                                                ,name=(fname e)
-                                                ,target=VarAccess {emeta=Meta.meta . Meta.sourcePos . fmeta $ e
-                                                ,qname=qName "this"}}
-                                ,rhs=fromJust . fexpr $ e}
 
     desugarMethod m@(Method {mbody, mlocals}) =
       m{mbody = desugarExpr mbody
