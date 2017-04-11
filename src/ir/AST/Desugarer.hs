@@ -7,6 +7,7 @@ import AST.PrettyPrinter
 import AST.Util
 import Types
 import Text.Megaparsec
+import Data.Maybe
 
 import qualified Data.List as List
 
@@ -61,7 +62,7 @@ desugarProgram p@(Program{traits, classes, functions}) =
     -- TODO: this method should append default field values at the begining of the constructor method
     desugarClassParams m@(Method {mbody, mlocals}) c@(Class{cmeta, cmethods, cfields}) | isConstructor m = m{mbody = Seq{
       emeta= Meta.meta (Meta.sourcePos cmeta),
-      eseq= (map (\e -> paramFieldAcces e) cfields) ++ [mbody]
+      eseq= (map (\e -> paramFieldAcces e) ( List.filter (\c -> isJust (fexpr c)  ) cfields )) ++ [mbody]
     }}
 
 
@@ -69,10 +70,6 @@ desugarProgram p@(Program{traits, classes, functions}) =
 
     targetForParam _ (Just ex) = ex
     targetForParam meta Nothing = Skip {emeta=meta}
-
-    --paramFieldAcces e  = VarAccess {emeta=Meta.meta (Meta.sourcePos (fmeta e)),
-      --                              qname=qName "this"}
-
 
     paramFieldAcces e =
 
