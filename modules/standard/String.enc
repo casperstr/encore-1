@@ -76,11 +76,10 @@ end
 -- [ ] Write proper docs
 -- Be aware of issue #204
 read class String : Id + Eq[String](compare(),length,data)
-  val data : EMBED char* END
-  val length : int
+  val data : EMBED char* END = s
+  val length : int = EMBED (int); strlen(#{s}); END
   def init(s:EMBED char* END) : unit
-    this.data = s
-    this.length = EMBED (int); strlen(#{s}); END
+    return
   end
 
 
