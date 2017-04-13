@@ -43,7 +43,11 @@ data BacktraceNode = BTFunction Name Type
                    | BTTypedef Type
                    | BTModule Name
                    | BTImport Namespace
+                     deriving(Eq)
 
+isBTExpr :: BacktraceNode -> Bool
+isBTExpr (BTExpr _) = True
+isBTExpr _ = False
 
 instance Show BacktraceNode where
   show (BTFunction n ty) =
@@ -74,6 +78,28 @@ instance Show BacktraceNode where
 type Backtrace = [(SourcePos, BacktraceNode)]
 emptyBT :: Backtrace
 emptyBT = []
+
+reduceBT :: Backtrace -> Backtrace
+reduceBT = truncateExprs . dropMiniLets . mergeBlocks . nub
+  where
+    mergeBlocks ((pos1, BTExpr seq@Seq{}):(pos2, BTExpr e2):bt) =
+      if hasBody e2
+      then mergeBlocks $ (pos2, BTExpr e2):bt
+      else (pos1, BTExpr seq) : mergeBlocks ((pos2, BTExpr e2) : bt)
+    mergeBlocks (node:bt) = node:mergeBlocks bt
+    mergeBlocks [] = []
+
+    dropMiniLets :: Backtrace -> Backtrace
+    dropMiniLets = filter (not . isMiniLetNode . snd)
+    isMiniLetNode node
+      | BTExpr e <- node
+      , Just MiniLet{} <- getSugared e = True
+      | otherwise = False
+
+    truncateExprs ((pos1, BTExpr e1):(pos2, BTExpr e2):bt) =
+      (pos1, BTExpr e1):(pos2, BTExpr e2):
+      filter (not . isBTExpr . snd) bt
+    truncateExprs bt = bt
 
 data ExecutionContext = MethodContext MethodDecl
                       | ClosureContext (Maybe Type)
@@ -163,7 +189,7 @@ instance Show TCError where
         " *** Error during typechecking *** \n" ++
         showSourcePos pos ++ "\n" ++
         show err ++ "\n" ++
-        concatMap showBT bt
+        concatMap showBT (reduceBT bt)
         where
           showBT (_, node) =
               case show node of
@@ -227,6 +253,7 @@ data Error =
   | NonAssignableLHSError
   | ValFieldAssignmentError Name Type
   | UnboundVariableError QualifiedName
+  | BuriedVariableError QualifiedName
   | ObjectCreationError Type
   | NonIterableError Type
   | EmptyArrayLiteralError
@@ -247,7 +274,6 @@ data Error =
   | TypeVariableAndVariableCommonNameError [Name]
   | UnionMethodAmbiguityError Type Name
   | MalformedUnionTypeError Type Type
-  | ConcreteTypeParameterError Type
   | ProvidingTraitFootprintError Type Type Name [FieldDecl]
   | TypeArgumentInferenceError Expr Type
   | AmbiguousTypeError Type [Type]
@@ -273,8 +299,10 @@ data Error =
   | ModelessError Type
   | ModeOverrideError Type
   | CannotConsumeError Expr
+  | CannotConsumeTypeError Expr
   | ImmutableConsumeError Expr
   | CannotGiveReadModeError Type
+  | CannotGiveSharableModeError Type
   | NonValInReadContextError Type
   | NonSafeInReadContextError Type Type
   | NonSafeInExtendedReadTraitError Type Name Type
@@ -285,6 +313,8 @@ data Error =
   | ThreadLocalFieldError Type
   | ThreadLocalFieldExtensionError Type FieldDecl
   | ThreadLocalArgumentError Expr
+  | PolymorphicArgumentSendError Expr Type
+  | PolymorphicReturnError Name Type
   | ThreadLocalReturnError Name
   | MalformedConjunctionError Type Type Type
   | CannotUnpackError Type
@@ -295,9 +325,9 @@ data Error =
   | ManifestConflictError Type Type
   | ManifestClassConflictError Type Type
   | UnmodedMethodExtensionError Type Name
-  | ActiveTraitError Type
+  | ActiveTraitError Type Type
   | NewWithModeError
-  | UnsafeTypeArgumentError Type
+  | UnsafeTypeArgumentError Type Type
   | SimpleError String
   ----------------------------
   -- Capturechecking errors --
@@ -532,6 +562,8 @@ instance Show Error where
                (show name) (refTypeName targetType)
     show (UnboundVariableError name) =
         printf "Unbound variable '%s'" (show name)
+    show (BuriedVariableError name) =
+        printf "Variable '%s' cannot be accessed during borrowing" (show name)
     show (ObjectCreationError ty)
         | isMainType ty = "Cannot create additional Main objects"
         | isCapabilityType ty =
@@ -579,7 +611,7 @@ instance Show Error where
             let actualTraits = typesFromCapability cap
                 expectedTraits = typesFromCapability expected
                 remainders = actualTraits \\ expectedTraits
-                nonDroppables = filter (not . isReadRefType) remainders
+                nonDroppables = filter (not . isReadSingleType) remainders
                 nonDroppable = head nonDroppables
             in if isCapabilityType expected &&
                   all (\te -> any (\ta -> ta == te &&
@@ -589,7 +621,7 @@ instance Show Error where
                else ""
     show (TypeVariableAmbiguityError expected ty1 ty2) =
         printf "Type variable '%s' cannot be bound to both '%s' and '%s'"
-               (show expected) (show ty1) (show ty2)
+               (getId expected) (show ty1) (show ty2)
     show (FreeTypeVariableError ty) =
         if getId ty == "void"
         then printf "Type 'void' is deprecated. Use 'unit' instead"
@@ -603,17 +635,14 @@ instance Show Error where
         where
           formattingName =
             let ns = map (\n -> "'" ++ show n ++ "', ") (init names)
-                lastName = "'" ++ (show $ last names) ++ "'"
-            in (show ns) ++ "and " ++ lastName
+                lastName = "'" ++ show (last names) ++ "'"
+            in show ns ++ "and " ++ lastName
     show (UnionMethodAmbiguityError ty name) =
         printf "Cannot disambiguate method '%s' in %s"
                (show name) (showWithKind ty)
     show (MalformedUnionTypeError ty union) =
         printf "Type '%s' is not compatible with %s"
                (show ty) (showWithKind union)
-    show (ConcreteTypeParameterError ty) =
-        printf "Concrete type '%s' cannot be used as a type parameter"
-               (show ty)
     show (TypeArgumentInferenceError call param) =
         printf "Cannot infer the type of parameter '%s' of %s '%s'"
                (show param) kind calledName
@@ -699,6 +728,10 @@ instance Show Error where
               (showModeOf ty) (refTypeName ty)
     show (CannotConsumeError expr) =
         printf "Cannot consume '%s'" (show (ppSugared expr))
+    show (CannotConsumeTypeError expr) =
+        printf ("Cannot consume '%s' of type '%s'. " ++
+                "Consider using a Maybe-type")
+               (show (ppSugared expr)) (show (getType expr))
     show (ImmutableConsumeError expr)
        | VarAccess{} <- expr =
            printf "Cannot consume immutable variable '%s'"
@@ -713,6 +746,10 @@ instance Show Error where
         printf ("Cannot give read mode to trait '%s'. " ++
                 "It must be declared as read at its declaration site")
                (getId trait)
+    show (CannotGiveSharableModeError ty) =
+        printf ("Cannot give sharable mode to %s. " ++
+                "It can only be used for type parameters")
+               (refTypeName ty)
     show (NonValInReadContextError ctx) =
         printf "Read %s can only have val fields"
                (if isTraitType ctx then "traits" else "classes")
@@ -763,6 +800,16 @@ instance Show Error where
         printf ("Method '%s' returns a local capability and cannot " ++
                 "be called by a different active object")
                (show name)
+    show (PolymorphicArgumentSendError arg ty) =
+        printf ("Cannot pass value of '%s' between active objects. " ++
+                "Its type is polymorphic so it may not be safe to share.\n" ++
+                "Consider marking the type variable '%s' as 'sharable'")
+               (show (ppSugared arg)) (getId ty)
+    show (PolymorphicReturnError name ty) =
+        printf ("Method '%s' returns a value of polymorphic type, and sharing " ++
+                "it between active objects may not be safe. \n" ++
+                "Consider marking the type variable '%s' as 'sharable'.")
+               (show name) (getId ty)
     show (MalformedConjunctionError ty nonDisjoint source) =
         printf "Type '%s' does not form a conjunction with '%s' in %s"
                (show ty) (show nonDisjoint) (Types.showWithKind source)
@@ -796,12 +843,22 @@ instance Show Error where
                 "  - Assign the method to an included trait: T(%s())")
                (show cls) (show name)
                "active, local, read, linear or subord" (show name)
-    show (ActiveTraitError trait) =
-        printf "Trait '%s' can only be included by active classes"
-               (show trait)
-    show (UnsafeTypeArgumentError ty) =
-        printf "Cannot use non-aliasable type '%s' as type argument."
-               (show ty)
+    show (ActiveTraitError active nonActive) =
+        printf ("Active trait '%s' can only be included together with " ++
+                "other active traits. Found '%s'")
+               (showWithoutMode active) (show nonActive)
+    show (UnsafeTypeArgumentError formal ty) =
+        if isModeless ty then
+          -- TODO: Could be more precise (e.g. distinguish between linear/subord)
+          printf "Cannot use non-aliasable type '%s' as type argument"
+                 (show ty)
+        else
+          printf ("Cannot use %s type '%s' as type argument. " ++
+                  "Type parameter '%s' requires the type to have %s mode")
+                 (showModeOf ty) (showWithoutMode ty)
+                 (getId formal) (if isModeless formal
+                                 then "an aliasable"
+                                 else showModeOf formal)
     show (SimpleError msg) = msg
     ----------------------------
     -- Capturechecking errors --
@@ -825,7 +882,7 @@ instance Show Error where
         printf "Cannot borrow linear array value from non-linear path '%s'"
                (show (ppSugared target))
     show (NonBorrowableError e) =
-        printf "Expression '%s' cannot be borrowed. Go ask Elias why"
+        printf "Expression '%s' cannot be borrowed."
                (show (ppSugared e))
     show (ActiveBorrowError arg targetType) =
         printf ("Expression '%s' cannot be borrowed " ++
@@ -866,8 +923,6 @@ data Warning = StringDeprecatedWarning
              | PolymorphicIdentityWarning
              | ShadowedMethodWarning FieldDecl
              | ExpressionResultIgnoredWarning Expr
-             | PolymorphicArgumentSendWarning Expr
-             | PolymorphicReturnWarning Name
              | ArrayTypeArgumentWarning
              | ArrayInReadContextWarning
              | SharedArrayWarning
@@ -883,16 +938,6 @@ instance Show Warning where
         "Later versions of Encore will require type constraints for this to work"
     show (ExpressionResultIgnoredWarning expr) =
         "Result of '" ++ show (ppSugared expr) ++ "' is discarded"
-    show (PolymorphicArgumentSendWarning arg) =
-        printf ("Passing polymorphic expression '%s' between " ++
-                "active objects may be unsafe. \n" ++
-                "This will be fixed in a later version of Encore." )
-               (show (ppSugared arg))
-    show (PolymorphicReturnWarning name) =
-        printf ("Method '%s' returns a polymorphic value, and calling " ++
-                "it from a different active object may be unsafe. \n" ++
-                "This will be fixed in a later version of Encore.")
-               (show name)
     show (ShadowedMethodWarning Field{fname, ftype}) =
         printf ("Field '%s' holds %s and could be confused with " ++
                 "the method of the same name")

@@ -72,11 +72,6 @@ getChildren MessageSend {target, args} = target : args
 getChildren ExtractorPattern {arg} = [arg]
 getChildren FunctionCall {args} = args
 getChildren FunctionAsValue {} = []
-getChildren Liftf {val} = [val]
-getChildren Liftv {val} = [val]
-getChildren PartyJoin {val} = [val]
-getChildren PartyExtract {val} = [val]
-getChildren PartyEach {val} = [val]
 getChildren PartySeq {par, seqfunc} = [par, seqfunc]
 getChildren PartyPar {parl, parr} = [parl, parr]
 getChildren PartyReduce {seqfun, pinit, par} = [pinit, par, seqfun]
@@ -101,6 +96,7 @@ getChildren Match {arg, clauses} = arg:getChildrenClauses clauses
 
     getChildrenClause MatchClause {mcpattern, mchandler, mcguard} =
         [mcpattern, mchandler, mcguard]
+getChildren Borrow {target, body} = [target, body]
 getChildren Get {val} = [val]
 getChildren Forward {forwardExpr} = [forwardExpr]
 getChildren Yield {val} = [val]
@@ -155,11 +151,6 @@ putChildren (target : args) e@(MethodCall {}) = e{target = target, args = args}
 putChildren (target : args) e@(MessageSend {}) = e{target = target, args = args}
 putChildren [arg] e@(ExtractorPattern {}) = e{arg = arg}
 putChildren args e@(FunctionCall {}) = e{args = args}
-putChildren [val] e@(Liftf {}) = e{val}
-putChildren [val] e@(Liftv {}) = e{val}
-putChildren [val] e@(PartyJoin {}) = e{val}
-putChildren [val] e@(PartyExtract {}) = e{val}
-putChildren [val] e@(PartyEach {}) = e{val}
 putChildren [par, seqfunc] e@(PartySeq {}) = e{par=par, seqfunc=seqfunc}
 putChildren [l, r] e@(PartyPar {}) = e{parl=l, parr=r}
 putChildren [pinit, par, seqfun] e@(PartyReduce {}) = e{par=par, seqfun=seqfun, pinit=pinit}
@@ -186,6 +177,7 @@ putChildren (arg:clauseList) e@(Match {clauses}) =
                 putClausesChildren rest rClauses
           putClausesChildren _ _ =
               error "Util.hs: Wrong number of children of of match clause"
+putChildren [target, body] e@(Borrow {}) = e{target, body}
 putChildren [val] e@(Get {}) = e{val = val}
 putChildren [forwardExpr] e@(Forward {}) = e{forwardExpr = forwardExpr}
 putChildren [val] e@(Yield {}) = e{val = val}
@@ -236,11 +228,6 @@ putChildren _ e@(MethodCall {}) = error "'putChildren l MethodCall' expects l to
 putChildren _ e@(MessageSend {}) = error "'putChildren l MessageSend' expects l to have at least 1 element"
 putChildren _ e@(ExtractorPattern {}) = error "'putChildren l ExtractorPattern' expects l to have 1 element"
 putChildren _ e@(FunctionAsValue {}) = error "'putChildren l FunctionAsValue' expects l to have 0 elements"
-putChildren _ e@(Liftf {}) = error "'putChildren l Liftf' expects l to have 1 element"
-putChildren _ e@(Liftv {}) = error "'putChildren l Liftv' expects l to have 1 element"
-putChildren _ e@(PartyJoin {}) = error "'putChildren l PartyJoin' expects l to have 1 element"
-putChildren _ e@(PartyExtract {}) = error "'putChildren l PartyExtract' expects l to have 1 element"
-putChildren _ e@(PartyEach {}) = error "'putChildren l PartyEach' expects l to have 1 element"
 putChildren _ e@(PartySeq {}) = error "'putChildren l PartySeq' expects l to have 2 elements"
 putChildren _ e@(PartyPar {}) = error "'putChildren l PartyPar' expects l to have 2 elements"
 putChildren _ e@(PartyReduce {}) = error "'putChildren l PartyReduce' expects l to have 3 elements"
@@ -255,7 +242,8 @@ putChildren _ e@(While {}) = error "'putChildren l While' expects l to have 2 el
 putChildren _ e@(DoWhile {}) = error "'putChildren l While' expects l to have 2 elements"
 putChildren _ e@(Repeat {}) = error "'putChildren l Repeat' expects l to have 2 elements"
 putChildren _ e@(For {}) = error "'putChildren l For' expects l to have 3 elements"
-putChildren _ e@(Match {}) = error "'putChildren l Case' expects l to have 1 element"
+putChildren _ e@(Match {}) = error "'putChildren l Match' expects l to have at least 1 element"
+putChildren _ e@(Borrow {}) = error "'putChildren l Borrow' expects l to have 2 element"
 putChildren _ e@(Get {}) = error "'putChildren l Get' expects l to have 1 element"
 putChildren _ e@(Forward {}) = error "'putChildren l Forward' expects l to have 1 element"
 putChildren _ e@(Yield {}) = error "'putChildren l Yield' expects l to have 1 element"
