@@ -3,7 +3,6 @@ active class Main
     new Tester()
   end
 end
-
 active class Tester
   val foo : String = "foo"  
   val bar : String = "bar"
