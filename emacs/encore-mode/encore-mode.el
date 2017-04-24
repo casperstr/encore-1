@@ -57,6 +57,7 @@
         "and"
         "async"
         "await"
+        "borrow"
         "borrowed"
         "break"
         "by"
@@ -95,6 +96,7 @@
         "repeat"
         "require"
         "shared"
+        "sharable"
         "stream"
         "subord"
         "suspend"
@@ -321,6 +323,7 @@
               "\\<let\\>" "\\|"
               "\\<if\\>" "\\|"
               "\\<unless\\>" "\\|"
+              "\\<borrow\\>" "\\|"
               "\\<match\\>.*\\<with\\> *\\($\\|--\\)\\|\\<case\\>.*=>[ \t]*\\($\\|--\\)"))
 
 (defun encore-skip-block ()

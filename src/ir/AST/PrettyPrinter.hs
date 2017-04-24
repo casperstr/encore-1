@@ -273,11 +273,6 @@ ppExpr MessageSend {target, name, args, typeArguments} =
     maybeParens target <> "!" <> ppName name <>
       withTypeArguments typeArguments <>
       parens (commaSep (map ppExpr args))
-ppExpr Liftf {val} = "liftf" <> parens (ppExpr val)
-ppExpr Liftv {val} = "liftv" <> parens (ppExpr val)
-ppExpr PartyJoin {val} = "join" <> parens (ppExpr val)
-ppExpr PartyExtract {val} = "extract" <> parens(ppExpr val)
-ppExpr PartyEach {val} = "each" <> parens(ppExpr val)
 ppExpr PartySeq {par, seqfunc} = ppExpr par <+> ">>" <+> parens (ppExpr seqfunc)
 ppExpr PartyPar {parl, parr} = ppExpr parl <+> "|||" <+> ppExpr parr
 ppExpr PartyReduce {seqfun, pinit, par} = "reduce" <>
@@ -373,6 +368,10 @@ ppExpr Match {arg, clauses} =
           indent (ppBody mchandler) $+$
         "end"
       ppMatchClauses = foldr (($+$) . indent . ppClause) ""
+ppExpr Borrow {target, name, body} =
+    "borrow" <+> ppExpr target <+> "as" <+> ppName name <+> "in" $+$
+      indent (ppBody body) $+$
+    "end"
 ppExpr FutureChain {future, chain} =
     ppExpr future <+> "~~>" <+> ppExpr chain
 ppExpr Get {val} = "get" <> parens (ppExpr val)

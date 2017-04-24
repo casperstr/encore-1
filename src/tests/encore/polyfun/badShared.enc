@@ -1,0 +1,20 @@
+fun leak[sharable t](x : t) : t
+  val theif = new Theif[t]
+  theif ! send(x)
+  x
+end
+
+active class Theif[t]
+  def send(x : t) : unit
+    println("Received")
+  end
+end
+
+local class Token
+end
+
+active class Main
+  def main() : unit
+    leak(new Token)
+  end
+end

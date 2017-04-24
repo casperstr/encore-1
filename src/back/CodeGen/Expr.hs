@@ -106,11 +106,8 @@ getRuntimeType :: A.Expr -> CCode Expr
 getRuntimeType = runtimeType . Ty.getResultType . A.getType
 
 newParty :: A.Expr -> CCode Name
-newParty (A.Liftv {}) = partyNewParV
-newParty (A.Liftf {}) = partyNewParF
 newParty (A.PartyPar {}) = partyNewParP
-newParty _ = error $ "ERROR in 'Expr.hs': node is different from 'Liftv', " ++
-                     "'Liftf' or 'PartyPar'"
+newParty _ = error "Expr.hs: node is not 'PartyPar'"
 
 translateDecl (vars, expr) = do
   (ne, te) <- translate expr
@@ -185,39 +182,6 @@ instance Translatable A.Expr (State Ctx.Context (CCode Lval, CCode Stat)) where
           StatAsExpr (if Ty.isTypeVar ty
                       then fromEncoreArgT (Ptr void) (AsExpr n)
                       else n) t
-
-  translate l@(A.Liftf {A.val}) = do
-    (nval, tval) <- translate val
-    let runtimeT = (runtimeType . A.getType) val
-    (nliftf, tliftf) <- namedTmpVar "par" (A.getType l) $
-                        Call (newParty l) [AsExpr encoreCtxVar, AsExpr nval, runtimeT]
-    return (nliftf, Seq [tval, tliftf])
-
-  translate l@(A.Liftv {A.val}) = do
-    (nval, tval) <- translate val
-    let runtimeT = (runtimeType . A.getType) val
-    (nliftv, tliftv) <- namedTmpVar "par" (A.getType l) $
-                        Call (newParty l) [AsExpr encoreCtxVar,
-                                           asEncoreArgT (translate $ A.getType val) (AsExpr nval), runtimeT]
-    return (nliftv, Seq [tval, tliftv])
-
-  translate p@(A.PartyJoin {A.val}) = do
-    (nexpr, texpr) <- translate val
-    let typ = A.getType p
-    (nJoin, tJoin) <- namedTmpVar "par" typ $ Call partyJoin [encoreCtxVar, nexpr]
-    return (nJoin, Seq [texpr, tJoin])
-
-  translate p@(A.PartyExtract {A.val}) = do
-    (nval, tval) <- translate val
-    let runtimeT = (runtimeType . Ty.getResultType . A.getType) p
-    (nExtract, tExtract) <- namedTmpVar "arr" (A.getType p) $
-                            Call partyExtract [AsExpr encoreCtxVar, AsExpr nval, runtimeT]
-    return (nExtract, Seq [tval, tExtract])
-
-  translate p@(A.PartyEach {A.val}) = do
-    (nval, tval) <- translate val
-    (nEach, tEach) <- namedTmpVar "par" (A.getType p) $ Call partyEach [encoreCtxVar, nval]
-    return (nEach, Seq [tval, tEach])
 
   translate p@(A.PartyPar {A.parl, A.parr}) = do
     (nleft, tleft) <- translate parl
@@ -546,8 +510,8 @@ instance Translatable A.Expr (State Ctx.Context (CCode Lval, CCode Stat)) where
     return (nbody, Seq $ concat tdecls ++ [tbody])
 
   translate new@(A.NewWithInit {A.ty, A.args})
-    | Ty.isActiveRefType ty = delegateUse callTheMethodOneway
-    | Ty.isSharedRefType ty = delegateUse callTheMethodOneway
+    | Ty.isActiveSingleType ty = delegateUse callTheMethodOneway
+    | Ty.isSharedSingleType ty = delegateUse callTheMethodOneway
     | otherwise = delegateUse callTheMethodSync
     where
       delegateUse methodCall =
@@ -566,7 +530,7 @@ instance Translatable A.Expr (State Ctx.Context (CCode Lval, CCode Stat)) where
               Seq $
                 [constructorCall] ++
                 initArgs ++
-                [ Statement $ callTypeParamsInit $ (AsExpr nnew):typeArgs
+                [ Statement $ callTypeParamsInit $ AsExpr nnew:typeArgs
                 , Statement result]
               )
 
@@ -659,7 +623,7 @@ instance Translatable A.Expr (State Ctx.Context (CCode Lval, CCode Stat)) where
               )
           syncAccess = A.isThisAccess target ||
                        (Ty.isPassiveRefType . A.getType) target
-          sharedAccess = Ty.isSharedRefType $ A.getType target
+          sharedAccess = Ty.isSharedSingleType $ A.getType target
 
   translate call@A.MessageSend{A.emeta, A.target, A.name, A.args, A.typeArguments}
     | (Ty.isTraitType . A.getType) target ||
@@ -680,7 +644,7 @@ instance Translatable A.Expr (State Ctx.Context (CCode Lval, CCode Stat)) where
     | otherwise = delegateUseM callTheMethodFuture (Just "fut")
     where
       targetTy = A.getType target
-      isActive = Ty.isActiveRefType targetTy
+      isActive = Ty.isActiveSingleType targetTy
       isStream = Ty.isStreamType $ A.getType call
 
       delegateUseM msgSend sym = do

@@ -33,6 +33,7 @@ desugarProgram p@(Program{traits, classes, functions}) =
       | isActive c = c{cmethods = map desugarMethod (await:suspend:cmethods)}
       where
         await = Method{mmeta
+                      ,mimplicit = True
                       ,mheader=awaitHeader
                       ,mlocals=[]
                       ,mbody=Await emeta $ VarAccess emeta (qName "f")}
@@ -43,7 +44,11 @@ desugarProgram p@(Program{traits, classes, functions}) =
                             ,htype=unitType
                             ,hparams=[awaitParam]}
         awaitParam = Param{pmeta, pmut=Val, pname=Name "f", ptype=futureType $ typeVar "_t"}
-        suspend = Method{mmeta, mheader=suspendHeader, mlocals=[], mbody=Suspend emeta}
+        suspend = Method{mmeta
+                        ,mimplicit = True
+                        ,mheader = suspendHeader
+                        ,mlocals = []
+                        ,mbody = Suspend emeta}
         suspendHeader = Header{hmodifiers=[]
                               ,kind=NonStreaming
                               ,htypeparams=[]
@@ -80,15 +85,20 @@ desugarProgram p@(Program{traits, classes, functions}) =
        ,mlocals = map desugarFunction mlocals}
 
     -- NOTE:
-    -- `selfSugar` should always be the first thing.
+    -- `selfSugar` should always be the first desugaring to run.
     -- otherwise the unsugared version is printed on typechecking errors
-    desugarExpr e = (extend removeDeadMiniLet . extend desugar . extend optionalAccess . extend selfSugar) e
+    desugarExpr = extend removeDeadMiniLet .
+                  extend desugar .
+                  extend optionalAccess .
+                  extend selfSugar
 
 -- | Desugars the notation `x?.foo()` and `actor?!bar()` into
 --
---     match x with
---       case Just(_x) => Just(_x.foo())
---       case Nothing  => Nothing
+--     borrow x as _tmp in
+--       match _tmp with
+--         case Just(_x) => Just(_x.foo())
+--         case Nothing  => Nothing
+--       end
 --     end
 --
 -- Currently the support is only for Option types.
@@ -96,21 +106,26 @@ optionalAccess :: Expr -> Expr
 optionalAccess Optional {emeta=em, optTag} =
   let (emeta, m, target) = getTemplate optTag
       handlerVar = VarAccess em (qName "_optAccess")
+      borrowName = Name "_tmp"
+      borrowVar = VarAccess em (qLocal borrowName)
       maybeVal = MaybeValue em $ JustData (m {target = handlerVar})
-      targetName = Name "_targetOptAccess"
-      targetVar = VarAccess em (qLocal targetName)
-      result = Match emeta targetVar
+      match =
+        Match emeta borrowVar
         [clauseNothing em,
          MatchClause {mcpattern = MaybeValue{emeta=em, mdt = JustData handlerVar}
                      ,mchandler = maybeVal
                      ,mcguard = BTrue em}]
-  in Let em Val [([VarNoType targetName], target)] result
+  in Borrow{emeta = em
+           ,target
+           ,name = borrowName
+           ,body = match
+           }
   where
     getTemplate (QuestionBang m@MessageSend{emeta, target}) = (emeta, m, target)
     getTemplate (QuestionDot m@MethodCall{emeta, target}) = (emeta, m, target)
     getTemplate (QuestionDot f@FieldAccess{emeta, target}) = (emeta, f, target)
-    getTemplate (QuestionBang e) = error $ "Desugarer.hs: error desugaring expression '" ++ (show $ ppExpr e) ++ "'"
-    getTemplate (QuestionDot e) = error $ "Desugarer.hs: error desugaring expression '" ++ (show $ ppExpr e) ++ "'"
+    getTemplate (QuestionBang e) = error $ "Desugarer.hs: error desugaring expression '" ++ show (ppExpr e) ++ "'"
+    getTemplate (QuestionDot e) = error $ "Desugarer.hs: error desugaring expression '" ++ show (ppExpr e) ++ "'"
     clauseNothing emeta = MatchClause {mcpattern = MaybeValue{emeta, mdt = NothingData}
                                       ,mchandler = MaybeValue{emeta, mdt = NothingData}
                                       ,mcguard   = BTrue emeta}

@@ -218,13 +218,16 @@ instance Eq ClassDecl where
   a == b = getId (cname a) == getId (cname b)
 
 isActive :: ClassDecl -> Bool
-isActive = isActiveRefType . cname
+isActive Class{cname, ccomposition} =
+  isActiveSingleType cname ||
+  isModeless cname &&
+  all isActiveSingleType (typesFromTraitComposition ccomposition)
 
 isPassive :: ClassDecl -> Bool
 isPassive cls = not (isActive cls) && not (isShared cls)
 
 isShared :: ClassDecl -> Bool
-isShared = isSharedRefType . cname
+isShared = isSharedSingleType . cname
 
 isMainClass :: ClassDecl -> Bool
 isMainClass cdecl =
@@ -443,6 +446,7 @@ instance HasMeta ParamDecl where
 data MethodDecl =
     Method {
       mmeta   :: Meta MethodDecl,
+      mimplicit :: Bool,
       mheader :: FunctionHeader,
       mlocals :: [Function],
       mbody   :: Expr
@@ -461,10 +465,13 @@ isMainMethod ty name = isMainType ty && (name == Name "main")
 isConstructor :: MethodDecl -> Bool
 isConstructor m = methodName m == constructorName
 
+isImplicitMethod = mimplicit
+
 emptyConstructor :: ClassDecl -> MethodDecl
 emptyConstructor cdecl =
     let pos = AST.AST.getPos cdecl
     in Method{mmeta = meta pos
+             ,mimplicit = True
              ,mheader = Header{hmodifiers = []
                               ,kind = NonStreaming
                               ,htypeparams = []
@@ -573,19 +580,6 @@ data Expr = Skip {emeta :: Meta Expr}
                      eparams :: [ParamDecl],
                      mty :: Maybe Type,
                      body :: Expr}
-          -- TODO: the AST nodes below can be removed as soon as
-          -- OldParser.hs gets removed
-          | Liftf {emeta :: Meta Expr,
-                   val :: Expr}
-          | Liftv {emeta :: Meta Expr,
-                   val :: Expr}
-          | PartyJoin {emeta :: Meta Expr,
-                       val :: Expr}
-          | PartyExtract {emeta :: Meta Expr,
-                          val :: Expr}
-          | PartyEach {emeta :: Meta Expr,
-                       val :: Expr}
-          -- END TODO
           | PartySeq {emeta :: Meta Expr,
                       par :: Expr,
                       seqfunc :: Expr}
@@ -642,6 +636,10 @@ data Expr = Skip {emeta :: Meta Expr}
           | Match {emeta :: Meta Expr,
                    arg :: Expr,
                    clauses :: [MatchClause]}
+          | Borrow {emeta  :: Meta Expr,
+                    target :: Expr,
+                    name   :: Name,
+                    body   :: Expr}
           | Get {emeta :: Meta Expr,
                  val :: Expr}
           | Forward {emeta :: Meta Expr,
@@ -823,6 +821,27 @@ isImpure Assign {} = True
 isImpure NewWithInit {} = True
 isImpure New {} = True
 isImpure _ = False
+
+hasBody :: Expr -> Bool
+hasBody Closure {} = True
+hasBody Async {} = True
+hasBody Let {} = True
+hasBody IfThenElse {} = True
+hasBody IfThen {} = True
+hasBody Unless {} = True
+hasBody While {} = True
+hasBody DoWhile {} = True
+hasBody Repeat {} = True
+hasBody For {} = True
+hasBody Match {} = True
+hasBody _ = False
+
+findRoot :: Expr -> Expr
+findRoot FieldAccess{target} = findRoot target
+findRoot MethodCall{target} = findRoot target
+findRoot MessageSend{target} = findRoot target
+findRoot TupleAccess{target} = findRoot target
+findRoot e = e
 
 instance HasMeta Expr where
     getMeta = emeta

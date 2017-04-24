@@ -184,6 +184,7 @@ reservedNames =
     ,"and"
     ,"bool"
     ,"break"
+    ,"borrow"
     ,"borrowed"
     ,"case"
     ,"char"
@@ -352,9 +353,9 @@ typ = makeExprParser singleType opTable
         <|> embed
         <|> range
         <|> builtin
+        <|> primitive
         <|> try modedArrow
         <|> refType
-        <|> primitive
         <|> typeVariable
         <|> parenthesized
         <?> "type"
@@ -415,8 +416,7 @@ typ = makeExprParser singleType opTable
 typeVariable :: EncParser Type
 typeVariable = do
   notFollowedBy upperChar
-  id <- identifier
-  return $ typeVar id
+  typeVar <$> identifier
   <?> "lower case type variable"
 
 data ADecl = CDecl{cdecl :: ClassDecl} | TDecl{tdecl :: TraitDecl} | TDef{tdef :: Typedef} | FDecl{fdecl :: Function}
@@ -522,7 +522,12 @@ embedTL = do
        ) <|>
    (return $ EmbedTL (meta pos) "" ""))
 
-optionalTypeParameters = option [] (brackets $ commaSep1 typ)
+optionalTypeParameters = option [] (brackets $ commaSep1 modedTypeVar)
+  where
+    modedTypeVar = do
+      setMode <- option id mode
+      typeVar <- typeVariable
+      return $ setMode typeVar
 
 typedef :: EncParser Typedef
 typedef = do
@@ -628,7 +633,9 @@ mode = (reserved "linear" >> return makeLinear)
        <|>
        (reserved "active" >> return makeActive)
        <|>
-       (reserved "shared" >> return makeActive)
+       (reserved "shared" >> return makeShared)
+       <|>
+       (reserved "sharable" >> return makeSharable)
        <|>
        (reserved "unsafe" >> return makeUnsafe)
        <|>
@@ -820,6 +827,7 @@ methodDecl = do
         alignedExpressions (buildMethod mmeta mheader)
     buildMethod mmeta mheader block =
       return Method{mmeta
+                   ,mimplicit = False
                    ,mheader
                    ,mbody = makeBody block
                    ,mlocals = []
@@ -974,6 +982,7 @@ expr = notFollowedBy nl >>
      <|> continue
      <|> closure
      <|> match
+     <|> borrow
      <|> blockedTask
      <|> for
      <|> while
@@ -1109,8 +1118,8 @@ expr = notFollowedBy nl >>
               varOrCallFunction = dot >> varOrCall
 
           compartmentAccess = do
-            pos <-  getPosition
-            n <- L.integer
+            pos <- getPosition
+            n <- lexeme L.integer
             return $ IntLiteral (meta pos) (fromInteger n)
 
           varOrCall = do
@@ -1354,6 +1363,15 @@ expr = notFollowedBy nl >>
         atLevel indent $ reserved "end"
         return theMatch
 
+      borrow = blockedConstruct $ do
+        emeta <- meta <$> getPosition
+        reserved "borrow"
+        target <- expression
+        reserved "as"
+        name <- Name <$> identifier
+        reserved "in"
+        return $ \body -> Borrow{emeta, target, name, body}
+
       yield = do
         emeta <- meta <$> getPosition
         reserved "yield"
@@ -1479,7 +1497,7 @@ expr = notFollowedBy nl >>
 
       explicitReturn = do pos <- getPosition
                           reserved "return"
-                          expr <- option (Skip (meta pos)) (do {expression})
+                          expr <- option (Skip (meta pos)) expression
                           return $ Return (meta pos) expr
 
       bracketed =
