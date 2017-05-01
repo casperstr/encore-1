@@ -434,7 +434,8 @@ data ParamDecl = Param {
   pmeta :: Meta ParamDecl,
   pmut  :: Mutability,
   pname :: Name,
-  ptype :: Type
+  ptype :: Type,
+  pdefault :: Maybe Expr
 } deriving (Show, Eq)
 
 instance HasMeta ParamDecl where

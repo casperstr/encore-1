@@ -798,7 +798,9 @@ paramDecl = do
   pname <- Name <$> identifier
   colon
   ptype <- typ
-  return Param{pmeta, pmut, pname, ptype}
+  optional $ reservedOp "="
+  pdefault <- optional expression
+  return Param{pmeta, pmut, pname, ptype, pdefault}
 
 patternParamDecl :: EncParser (Expr, Type)
 patternParamDecl = do
