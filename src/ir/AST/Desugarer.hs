@@ -11,40 +11,52 @@ import Data.Maybe
 
 import qualified Data.List as List
 
+
+createFunction :: Function -> [Expr] -> Function
+createFunction func@(Function{funheader}) defaultParams =
+  func{funheader=Header{
+        hmodifiers= hmodifiers funheader,
+        kind= kind funheader,
+        htypeparams= take ((length (hparams funheader)) - (length defaultParams)) (htypeparams funheader),
+        hname=Name (show (hname funheader) ++ show (length defaultParams)),
+        htype= htype funheader,
+        hparams= params
+    },
+    funbody=Return {emeta= Meta.meta (Meta.sourcePos (funmeta func)),
+                    val= FunctionCall{
+      emeta=Meta.meta (Meta.sourcePos (funmeta func)),
+      typeArguments=htypeparams funheader,
+      qname= qName (show (hname funheader)),
+      args= (map (\e -> VarAccess{emeta =  Meta.meta (Meta.sourcePos (pmeta e)),qname = qName (show (pname e))}) params) ++ defaultParams
+    }}
+
+  }
+  where
+    params = take ((length (hparams funheader)) - (length defaultParams)) (hparams funheader)
+
+desugarFunctionHeader :: Function -> [Expr] -> [Function]
+desugarFunctionHeader f [] = []
+desugarFunctionHeader f params@(_:xs) = desugarFunctionHeader f xs ++ [createFunction f params]
+
+desugarDefaultParamaters :: Function -> [Function]
+desugarDefaultParamaters func = desugarFunctionHeader func defaultParams
+  where
+    defaultParams = map (fromJust . pdefault) (List.filter (\p@(Param{pdefault}) -> isJust pdefault) (hparams (funheader func)))
+
 desugarProgram :: Program -> Program
 desugarProgram p@(Program{traits, classes, functions}) =
   p{
     traits = map desugarTrait traits,
     classes = map (desugarClass . desugarClassParams) classes,
-    functions = map desugarFunction functions -- ++ map desugarDefaultParam functions
+    functions = (map desugarFunction functions) ++ concat (map desugarDefaultParamaters functions)
   }
   where
-    desugarDefaultParam f@(Function{funbody,funlocals,funmeta,funheader, funsource}) = Function{funmeta = funmeta,
-        funheader =  Header {
-          hmodifiers  = hmodifiers funheader,
-          kind        = kind funheader,
-          htypeparams = htypeparams funheader,
-          hname       = Name (show (hname funheader) ++ show (length ( List.filter (\e -> isNothing (pdefault e)) (hparams funheader)))),
-          htype       = htype funheader,
-          hparams     = List.filter (\e -> isNothing (pdefault e)) (hparams funheader)
-    },
-        funbody   = FunctionCall{
-                    emeta=(Meta.meta (Meta.sourcePos funmeta)),
-                    qname= qName (show (hname funheader) ++ show (length (hparams funheader))),
-                    typeArguments = map ptype  (List.filter (\e -> isJust (pdefault e)) (hparams funheader)),
-                    args = map fromJust (map pdefault (List.filter (\e -> isJust (pdefault e)) (hparams funheader)))
-                  },
-        funlocals = [],
-        funsource = funsource
-    }
-
 
     desugarTrait t@Trait{tmethods} = t{tmethods = map desugarMethod tmethods}
 
-    desugarFunction f@(Function{funbody,funlocals,funheader}) =
+    desugarFunction f@(Function{funbody,funlocals}) =
       f{
-        funheader = desugarFunctionHeader funheader
-        ,funbody = desugarExpr funbody
+        funbody = desugarExpr funbody
        ,funlocals = map desugarFunction funlocals}
 
     desugarFunctionHeader fh@(Header{hname, hparams}) =
@@ -401,8 +413,6 @@ desugar f@FunctionCall{emeta, qname = QName{qnlocal = Name "Just"}
                       ,args = [arg]} =
   MaybeValue{emeta, mdt = JustData arg}
 
-desugar fc@FunctionCall{qname, args} =
-  fc{qname = qName ((show qname) ++ show (length args))}
 
 desugar e = e
 
