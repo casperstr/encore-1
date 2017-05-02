@@ -16,16 +16,39 @@ desugarProgram p@(Program{traits, classes, functions}) =
   p{
     traits = map desugarTrait traits,
     classes = map (desugarClass . desugarClassParams) classes,
-    functions = map desugarFunction functions
+    functions = map desugarFunction functions -- ++ map desugarDefaultParam functions
   }
   where
-    desugarTrait t@Trait{tmethods}=
-      t{tmethods = map desugarMethod tmethods}
-    desugarFunction f@(Function{funbody
-                               ,funlocals}) =
-      f{funbody = desugarExpr funbody
+    desugarDefaultParam f@(Function{funbody,funlocals,funmeta,funheader, funsource}) = Function{funmeta = funmeta,
+        funheader =  Header {
+          hmodifiers  = hmodifiers funheader,
+          kind        = kind funheader,
+          htypeparams = htypeparams funheader,
+          hname       = Name (show (hname funheader) ++ show (length ( List.filter (\e -> isNothing (pdefault e)) (hparams funheader)))),
+          htype       = htype funheader,
+          hparams     = List.filter (\e -> isNothing (pdefault e)) (hparams funheader)
+    },
+        funbody   = FunctionCall{
+                    emeta=(Meta.meta (Meta.sourcePos funmeta)),
+                    qname= qName (show (hname funheader) ++ show (length (hparams funheader))),
+                    typeArguments = map ptype  (List.filter (\e -> isJust (pdefault e)) (hparams funheader)),
+                    args = map fromJust (map pdefault (List.filter (\e -> isJust (pdefault e)) (hparams funheader)))
+                  },
+        funlocals = [],
+        funsource = funsource
+    }
+
+
+    desugarTrait t@Trait{tmethods} = t{tmethods = map desugarMethod tmethods}
+
+    desugarFunction f@(Function{funbody,funlocals,funheader}) =
+      f{
+        funheader = desugarFunctionHeader funheader
+        ,funbody = desugarExpr funbody
        ,funlocals = map desugarFunction funlocals}
 
+    desugarFunctionHeader fh@(Header{hname, hparams}) =
+        fh{hname = Name (show hname ++ show (length hparams))}
   -- Automatically give await and supend to active classes
   -- Then the Actor trait is in place, this desugaring step will be changed
   -- so that the Actor trait is included instead
@@ -257,6 +280,7 @@ desugar FunctionCall{emeta, qname = QName{qnlocal = Name "assertFalse"}
                  Exit (cloneMeta emeta) [IntLiteral (cloneMeta emeta) 1]])
            (Skip (cloneMeta emeta))
 
+
 -- If-expressions without else
 desugar IfThen{emeta, cond, thn} =
     IfThenElse{emeta
@@ -377,9 +401,14 @@ desugar f@FunctionCall{emeta, qname = QName{qnlocal = Name "Just"}
                       ,args = [arg]} =
   MaybeValue{emeta, mdt = JustData arg}
 
+desugar fc@FunctionCall{qname, args} =
+  fc{qname = qName ((show qname) ++ show (length args))}
+
 desugar e = e
 
 assertionFailed emeta assert =
   StringLiteral (cloneMeta emeta) $
                 "Assertion failed at " ++
                 Meta.showPos emeta ++ ":\n" ++ assert
+
+
