@@ -8,9 +8,26 @@ import AST.Util
 import Types
 import Text.Megaparsec
 import Data.Maybe
-
+import Debug.Trace
 import qualified Data.List as List
 
+findFunction :: QualifiedName -> [Function] ->  Maybe Function
+findFunction qname functions = List.find (\e -> ((show (functionName e)) == (show qname))) functions
+
+nameForArg :: Int -> String
+nameForArg 0 = ""
+nameForArg x = show x
+
+desugarDefaultParamatersCallWithFunction :: Expr -> Function -> Expr
+desugarDefaultParamatersCallWithFunction fc@(FunctionCall{qname, args}) fun@(Function{}) = fc{qname = qName ((show qname) ++ (traceId (nameForArg numOfDefaulParamsUsed)) ) }
+  where numOfDefaulParamsUsed =  (length (functionParams fun)) - (length args)
+desugarDefaultParamatersCallWithFunction fc _ = fc
+
+desugarDefaultParamatersCall ::  Program -> Expr -> Expr
+desugarDefaultParamatersCall p@(Program{functions}) fc@(FunctionCall{qname, args}) =
+    case (findFunction qname functions) of Just function -> desugarDefaultParamatersCallWithFunction fc function
+                                           _ -> fc
+desugarDefaultParamatersCall _ expr = expr
 
 createFunction :: Function -> [Expr] -> Function
 createFunction func@(Function{funheader}) defaultParams =
@@ -125,6 +142,7 @@ desugarProgram p@(Program{traits, classes, functions}) =
     desugarExpr = extend removeDeadMiniLet .
                   extend desugar .
                   extend optionalAccess .
+                  extend (desugarDefaultParamatersCall p).
                   extend selfSugar
 
 -- | Desugars the notation `x?.foo()` and `actor?!bar()` into
@@ -412,6 +430,7 @@ desugar x@VarAccess{emeta, qname = QName{qnlocal = Name "Nothing"}} =
 desugar f@FunctionCall{emeta, qname = QName{qnlocal = Name "Just"}
                       ,args = [arg]} =
   MaybeValue{emeta, mdt = JustData arg}
+
 
 
 desugar e = e
