@@ -19,9 +19,12 @@ nameForArg 0 = ""
 nameForArg x = show x
 
 desugarDefaultParamatersCallWithFunction :: Expr -> Function -> Expr
-desugarDefaultParamatersCallWithFunction fc@(FunctionCall{qname, args}) fun@(Function{}) = fc{qname = qName ((show qname) ++ (traceId (nameForArg numOfDefaulParamsUsed)) ) }
-  where numOfDefaulParamsUsed =  (length (functionParams fun)) - (length args)
-desugarDefaultParamatersCallWithFunction fc _ = fc
+desugarDefaultParamatersCallWithFunction fc@(FunctionCall{qname, args}) fun@(Function{}) =
+    if isDefaultValid then fc{qname = qName ((show qname) ++ (traceId (nameForArg numOfDefaultParamsUsed)) ) } else fc
+  where
+    numOfDefaultParamsUsed = (length (functionParams fun)) - (length args)
+    isDefaultValid = (numOfDefaultParamsUsed <= (length (List.filter (isJust . pdefault) (functionParams fun)))) && ((length args) <= (length (functionParams fun)))
+
 
 desugarDefaultParamatersCall ::  Program -> Expr -> Expr
 desugarDefaultParamatersCall p@(Program{functions}) fc@(FunctionCall{qname, args}) =
