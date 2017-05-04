@@ -1,11 +1,11 @@
 active class Main 
     def main() : unit
-      greet(11)
-      greet1()
+      println(greet(10))
+      println(greet1())
     end
 end
 
-fun greet(age : int = 20) : unit 
-    print(age)
+fun greet(age : int = 20) : int 
+    age
 end
   
