@@ -11,6 +11,8 @@ import Data.Maybe
 import Debug.Trace
 import qualified Data.List as List
 
+
+
 findFunction :: QualifiedName -> [Function] ->  Maybe Function
 findFunction qname functions = List.find (\e -> ((show (functionName e)) == (show qname))) functions
 
@@ -37,37 +39,92 @@ createFunction func@(Function{funheader}) defaultParams =
   func{funheader=Header{
         hmodifiers= hmodifiers funheader,
         kind= kind funheader,
-        htypeparams= take ((length (hparams funheader)) - (length defaultParams)) (htypeparams funheader),
+        htypeparams= take usedParams (htypeparams funheader),
         hname=Name (show (hname funheader) ++ show (length defaultParams)),
         htype= htype funheader,
         hparams= params
     },
-    funbody=Return {emeta= Meta.meta (Meta.sourcePos (funmeta func)),
+    funbody=Return {emeta= Meta.meta $ Meta.sourcePos $ funmeta func,
                     val= FunctionCall{
-      emeta=Meta.meta (Meta.sourcePos (funmeta func)),
+      emeta=Meta.meta $ Meta.sourcePos $ funmeta func,
       typeArguments=htypeparams funheader,
-      qname= qName (show (hname funheader)),
-      args= (map (\e -> VarAccess{emeta =  Meta.meta (Meta.sourcePos (pmeta e)),qname = qName (show (pname e))}) params) ++ defaultParams
+      qname= qName $ show $ hname funheader,
+      args= map (\e -> VarAccess{emeta =  Meta.meta $ Meta.sourcePos $ pmeta e, qname = qName $ show $ pname e}) params ++ defaultParams
     }}
 
   }
   where
+    usedParams = ((length (hparams funheader)) - (length defaultParams))
     params = take ((length (hparams funheader)) - (length defaultParams)) (hparams funheader)
 
 desugarFunctionHeader :: Function -> [Expr] -> [Function]
 desugarFunctionHeader f [] = []
 desugarFunctionHeader f params@(_:xs) = desugarFunctionHeader f xs ++ [createFunction f params]
 
+
+
+
+
+
 desugarDefaultParamaters :: Function -> [Function]
 desugarDefaultParamaters func = desugarFunctionHeader func defaultParams
   where
     defaultParams = map (fromJust . pdefault) (List.filter (\p@(Param{pdefault}) -> isJust pdefault) (hparams (funheader func)))
 
+
+-- create a method with default headers filled in
+createMethod :: AST.AST.MethodDecl -> [Expr] -> AST.AST.MethodDecl
+createMethod meth@(Method{mheader, mmeta}) defaultParams =
+  meth{mheader=Header{
+        hmodifiers= hmodifiers mheader,
+        kind= kind mheader,
+        htypeparams= take usedParams (htypeparams mheader),
+        hname=Name (show (hname mheader) ++ show (length defaultParams)),
+        htype= htype mheader,
+        hparams= params
+    },
+    mbody=Return {emeta= Meta.meta $ Meta.sourcePos $ mmeta,
+                    val= MethodCall{
+      emeta=Meta.meta $ Meta.sourcePos $ mmeta,
+      target=VarAccess {emeta=Meta.meta $ Meta.sourcePos $ mmeta, qname=qName "this"},
+      typeArguments=htypeparams mheader,
+      name= hname mheader,
+      args= map (\e -> VarAccess{emeta =  Meta.meta $ Meta.sourcePos $ pmeta e, qname = qName $ show $ pname e}) params ++ defaultParams
+    }}
+
+  }
+  where
+    usedParams = ((length (hparams mheader)) - (length defaultParams))
+    params = take ((length (hparams mheader)) - (length defaultParams)) (hparams mheader)
+
+
+
+
+
+desugarDefaultParamatersMethod :: MethodDecl -> [Expr] -> [MethodDecl]
+desugarDefaultParamatersMethod f [] = []
+desugarDefaultParamatersMethod f params@(_:xs) = desugarDefaultParamatersMethod f xs ++ [createMethod f params]
+
+
+desugarDefaultParamatersM :: MethodDecl -> [MethodDecl]
+desugarDefaultParamatersM m = desugarDefaultParamatersMethod m defaultParams
+  where
+    defaultParams = map (fromJust . pdefault) (List.filter (\p@(Param{pdefault}) -> isJust pdefault) (hparams (mheader m)))
+
+
+desugarDefaultParamatersClass :: Program -> ClassDecl -> ClassDecl
+desugarDefaultParamatersClass p c@(Class{cmethods}) = c{cmethods = cmethods ++ concat (map desugarDefaultParamatersM cmethods) }
+
+
+
+-- desugarDefaultParamatersMethod :: Program -> Method -> [Method]
+-- desugarDefaultParamatersMethod p @m(MethodDecl{mheader})
+
 desugarProgram :: Program -> Program
 desugarProgram p@(Program{traits, classes, functions}) =
   p{
     traits = map desugarTrait traits,
-    classes = map (desugarClass . desugarClassParams) classes,
+    classes = map (desugarClass . desugarClassParams . (desugarDefaultParamatersClass p)) classes,
     functions = (map desugarFunction functions) ++ concat (map desugarDefaultParamaters functions)
   }
   where

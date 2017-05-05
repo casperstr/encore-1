@@ -1,11 +1,14 @@
 active class Main
     def main() : unit
-      println(greet(10))
-      println(greet())
+      this.test1(20)
+    end
+
+    def test(x : int, y : int = 30) : unit
+   	  println(y)
     end
 end
 
-fun greet(age : int = 20) : int
+fun greet(base : int, age : int = 20) : int
     age
 end
 
