@@ -1,6 +1,7 @@
 active class Main
     def main() : unit
       this.test1(20)
+      val s = (new Greeter())!hej()
     end
 
     def test(x : int, y : int = 30) : unit
@@ -8,7 +9,13 @@ active class Main
     end
 end
 
-fun greet(base : int, age : int = 20) : int
-    age
+active class Greeter
+    def init() : unit
+      println("hej")
+    end
+
+    def new hej() : unit
+      println("hej igen")
+    end
 end
 

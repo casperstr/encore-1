@@ -9,6 +9,8 @@ grammar found in @doc/encore/@
 
 module Parser.Parser(parseEncoreProgram) where
 
+import Debug.Trace
+
 -- Library dependencies
 import Text.Megaparsec
 import Text.Megaparsec.String
@@ -822,6 +824,7 @@ methodDecl = do
       indentBlock $ do
         mmeta <- meta <$> getPosition
         mheader <- do reserved "def"
+                      iconstructor <- option False $ reserved "new" >> return True
                       modifiers <- many modifier
                       setHeaderModifier modifiers <$> functionHeader
                <|> do reserved "stream"
@@ -834,6 +837,8 @@ methodDecl = do
                    ,mbody = makeBody block
                    ,mlocals = []
                    }
+
+
 
 modifier :: EncParser Modifier
 modifier = (reserved "private" >> return ModPrivate)
