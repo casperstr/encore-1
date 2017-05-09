@@ -16,6 +16,13 @@ import qualified Data.List as List
 findFunction :: QualifiedName -> [Function] ->  Maybe Function
 findFunction qname functions = List.find (\e -> ((show (functionName e)) == (show qname))) functions
 
+findMethodAux :: Name -> [MethodDecl] -> Maybe MethodDecl
+findMethodAux name methods = List.find (\e -> ((show (methodName e)) == (show name))) methods
+
+findMethod :: Name -> [ClassDecl] -> Maybe MethodDecl
+findMethod name classes =
+
+
 nameForArg :: Int -> String
 nameForArg 0 = ""
 nameForArg x = show x
@@ -27,11 +34,21 @@ desugarDefaultParamatersCallWithFunction fc@(FunctionCall{qname, args}) fun@(Fun
     numOfDefaultParamsUsed = (length (functionParams fun)) - (length args)
     isDefaultValid = (numOfDefaultParamsUsed <= (length (List.filter (isJust . pdefault) (functionParams fun)))) && ((length args) <= (length (functionParams fun)))
 
+desugarDefaultParametersCallWithMethod :: Expr -> MethodDecl -> Expr
+desugarDefaultParametersCallWithMethod mc@(MethodCall{name, args}) m@(Method{}) =
+    if isDefaultValid then mc{name = Name ((show name) ++ (traceId (nameForArg numOfDefaultParamsUsed)) ) } else mc
+    where
+      numOfDefaultParamsUsed = (length (methodParams m)) - (length args)
+      isDefaultValid = (numOfDefaultParamsUsed <= (length (List.filter (isJust . pdefault) (methodParams m)))) && ((length args) <= (length (methodParams m)))
 
 desugarDefaultParamatersCall ::  Program -> Expr -> Expr
+desugarDefaultParamatersCall p@(Program{classes}) mc@(MethodCall{name, target, args}) =
+  case (findMethod name classes) of Just method -> desugarDefaultParametersCallWithMethod mc method
+                                    --     _ -> mc
 desugarDefaultParamatersCall p@(Program{functions}) fc@(FunctionCall{qname, args}) =
     case (findFunction qname functions) of Just function -> desugarDefaultParamatersCallWithFunction fc function
                                            _ -> fc
+
 desugarDefaultParamatersCall _ expr = expr
 
 createFunction :: Function -> [Expr] -> Function
@@ -499,5 +516,3 @@ assertionFailed emeta assert =
   StringLiteral (cloneMeta emeta) $
                 "Assertion failed at " ++
                 Meta.showPos emeta ++ ":\n" ++ assert
-
-
