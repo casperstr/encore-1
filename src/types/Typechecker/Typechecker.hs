@@ -182,14 +182,23 @@ instance Checkable FieldDecl where
     return f
 
 
-matchArgumentLength :: Type -> FunctionHeader -> Arguments -> TypecheckM ()
+matchArgumentLength :: Type -> FunctionHeader -> Arguments -> TypecheckM Name
 matchArgumentLength targetType header args =
-  unless (actual == expected) $
-         tcError $ WrongNumberOfMethodArgumentsError
-                   (hname header) targetType expected actual
+      if (actual == expected)
+        then return name
+        else
+          do
+          result <- asks $ methodLookup targetType defName
+          case result of
+            Just header' -> return defName
+            Nothing -> tcError $ WrongNumberOfMethodArgumentsError
+              (hname header) targetType expected actual
   where
+    name = hname header
+    defName = Name ("_" ++ show(name) ++ show (expected - actual))
     actual = length args
     expected = length (hparams header)
+
 
 meetRequiredFields :: [FieldDecl] -> Type -> TypecheckM ()
 meetRequiredFields cFields trait = do
@@ -692,10 +701,11 @@ instance Checkable Expr where
 
             (header, calledType) <- findMethodWithCalledType targetType (name mcall)
 
-            matchArgumentLength targetType header (args mcall)
+            calledName <- matchArgumentLength targetType header (args mcall)
+
             let eTarget' = setType calledType eTarget
                 typeParams = htypeparams header
-                argTypes = map ptype $ hparams header
+                argTypes = map ptype $ take (length (args mcall)) (hparams header) --är det här jag ska ändra längden?
                 resultType = htype header
 
             (eArgs, resultType', typeArgs) <-
@@ -718,7 +728,8 @@ instance Checkable Expr where
             return $ setArrowType (arrowType argTypes resultType) $
                      setType returnType' mcall {target = eTarget'
                                               ,args = eArgs
-                                              ,typeArguments = typeArgs}
+                                              ,typeArguments = typeArgs
+                                              ,name = calledName }
 
           errorInitMethod targetType name = do
             when (name == constructorName) $ tcError ConstructorCallError
