@@ -705,7 +705,7 @@ instance Checkable Expr where
 
             let eTarget' = setType calledType eTarget
                 typeParams = htypeparams header
-                argTypes = map ptype $ take (length (args mcall)) (hparams header) --är det här jag ska ändra längden?
+                argTypes = map ptype $ take (length (args mcall)) (hparams header)
                 resultType = htype header
 
             (eArgs, resultType', typeArgs) <-
@@ -803,24 +803,34 @@ instance Checkable Expr where
         let typeParams  = getTypeParameters ty
             argTypes    = getArgTypes ty
             resultType  = getResultType ty
+            actualLength = length args
+            expectedLength = length argTypes
+            defName = qName ("_" ++ show qname ++ show (expectedLength - actualLength))
+
+        calledName <-
+          if (actualLength == expectedLength)
+            then return qname
+            else do
+              result2 <- findVar defName
+              case result2 of
+                Just (qname2, ty2) -> return defName
+                Nothing -> tcError $ WrongNumberOfFunctionArgumentsError
+                            qname (length argTypes) (length args)
 
         unless (isArrowType ty) $
           tcError $ NonFunctionTypeError ty
-        unless (length args == length argTypes) $
-          tcError $ WrongNumberOfFunctionArgumentsError
-                      qname (length argTypes) (length args)
 
         (eArgs, returnType, typeArgs) <-
           if null typeArguments
-          then inferenceCall fcall typeParams argTypes resultType
+          then inferenceCall fcall typeParams (take actualLength argTypes) resultType
           else do
             unless (length typeArguments == length typeParams) $
                    tcError $ WrongNumberOfFunctionTypeArgumentsError qname
                              (length typeParams) (length typeArguments)
-            typecheckCall fcall typeParams argTypes resultType
+            typecheckCall fcall typeParams (take actualLength argTypes) resultType
         return $ setArrowType ty $
                  setType returnType fcall {args = eArgs,
-                                           qname = qname',
+                                           qname = calledName,
                                            typeArguments = typeArgs}
 
    ---  |- t1 .. |- tn
@@ -1423,7 +1433,7 @@ instance Checkable Expr where
                        tcError $ ValFieldAssignmentError name targetType
               | otherwise = return ()
 
-
+-- Karro
     doTypecheck fun@(FunctionAsValue {qname, typeArgs}) = do
          result <- findVar qname
          case result of

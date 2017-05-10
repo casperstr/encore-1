@@ -12,11 +12,6 @@ import Debug.Trace
 import qualified Data.List as List
 
 
-
-findFunction :: QualifiedName -> [Function] ->  Maybe Function
-findFunction qname functions = List.find (\e -> ((show (functionName e)) == (show qname))) functions
-
-
 nameForArg :: Int -> String
 nameForArg 0 = ""
 nameForArg x = show x
@@ -43,6 +38,7 @@ createFunction func@(Function{funheader}) defaultParams =
   where
     usedParams = ((length (hparams funheader)) - (length defaultParams))
     params = take ((length (hparams funheader)) - (length defaultParams)) (hparams funheader)
+
 
 desugarFunctionHeader :: Function -> [Expr] -> [Function]
 desugarFunctionHeader f [] = []
