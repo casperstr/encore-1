@@ -805,11 +805,11 @@ instance Checkable Expr where
             resultType  = getResultType ty
             actualLength = length args
             expectedLength = length argTypes
-            defName = qName ("_" ++ show qname ++ show (expectedLength - actualLength))
+            defName = qname'{qnlocal = Name $ "_" ++ show qname ++ show (expectedLength - actualLength)}
 
         calledName <-
           if (actualLength == expectedLength)
-            then return qname
+            then return qname'
             else do
               result2 <- findVar defName
               case result2 of

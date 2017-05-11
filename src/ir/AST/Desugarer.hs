@@ -93,10 +93,6 @@ desugarDefaultParametersClass :: Program -> ClassDecl -> ClassDecl
 desugarDefaultParametersClass p c@(Class{cmethods}) = c{cmethods = cmethods ++ concat (map desugarDefaultParametersM cmethods) }
 
 
-
--- desugarDefaultParametersMethod :: Program -> Method -> [Method]
--- desugarDefaultParametersMethod p @m(MethodDecl{mheader})
-
 desugarProgram :: Program -> Program
 desugarProgram p@(Program{traits, classes, functions}) =
   p{
@@ -113,8 +109,9 @@ desugarProgram p@(Program{traits, classes, functions}) =
         funbody = desugarExpr funbody
        ,funlocals = map desugarFunction funlocals}
 
-    desugarFunctionHeader fh@(Header{hname, hparams}) =
-        fh{hname = Name (show hname ++ show (length hparams))}
+--    desugarFunctionHeader fh@(Header{hname, hparams}) =
+  --      fh{hname = Name ("_" ++ show hname ++ show (length hparams))}
+
   -- Automatically give await and supend to active classes
   -- Then the Actor trait is in place, this desugaring step will be changed
   -- so that the Actor trait is included instead
