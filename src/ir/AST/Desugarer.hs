@@ -48,7 +48,7 @@ desugarFunctionHeader f params@(_:xs) = desugarFunctionHeader f xs ++ [createFun
 desugarDefaultParameters :: Function -> [Function]
 desugarDefaultParameters func = desugarFunctionHeader func defaultParams
   where
-    defaultParams = map (fromJust . pdefault) (List.filter (\p@(Param{pdefault}) -> isJust pdefault) (hparams (funheader func)))
+    defaultParams = map (desugar . fromJust . pdefault) (List.filter (\p@(Param{pdefault}) -> isJust pdefault) (hparams (funheader func)))
 
 
 -- create a method with default headers filled in
@@ -82,6 +82,7 @@ desugarDefaultParametersMethod :: MethodDecl -> [Expr] -> [MethodDecl]
 desugarDefaultParametersMethod f [] = []
 desugarDefaultParametersMethod f params@(_:xs) = desugarDefaultParametersMethod f xs ++ [createMethod f params]
 
+-- desugarDefaultParametersAux ::
 
 desugarDefaultParametersM :: MethodDecl -> [MethodDecl]
 desugarDefaultParametersM m = desugarDefaultParametersMethod m defaultParams
@@ -108,9 +109,6 @@ desugarProgram p@(Program{traits, classes, functions}) =
       f{
         funbody = desugarExpr funbody
        ,funlocals = map desugarFunction funlocals}
-
---    desugarFunctionHeader fh@(Header{hname, hparams}) =
-  --      fh{hname = Name ("_" ++ show hname ++ show (length hparams))}
 
   -- Automatically give await and supend to active classes
   -- Then the Actor trait is in place, this desugaring step will be changed
