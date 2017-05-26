@@ -82,7 +82,6 @@ desugarDefaultParametersMethod :: MethodDecl -> [Expr] -> [MethodDecl]
 desugarDefaultParametersMethod f [] = []
 desugarDefaultParametersMethod f params@(_:xs) = desugarDefaultParametersMethod f xs ++ [createMethod f params]
 
--- desugarDefaultParametersAux ::
 
 desugarDefaultParametersM :: MethodDecl -> [MethodDecl]
 desugarDefaultParametersM m = desugarDefaultParametersMethod m defaultParams
