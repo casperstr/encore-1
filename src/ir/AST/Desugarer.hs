@@ -108,7 +108,7 @@ desugarProgram p@(Program{traits, classes, functions}) =
     desugarFunction f@(Function{funbody,funlocals}) =
       f{
         funbody = desugarExpr funbody
-       ,funlocals = map desugarFunction funlocals}
+       ,funlocals = (map desugarFunction funlocals) ++ concat (map desugarDefaultParameters funlocals)}
 
   -- Automatically give await and supend to active classes
   -- Then the Actor trait is in place, this desugaring step will be changed
@@ -166,7 +166,7 @@ desugarProgram p@(Program{traits, classes, functions}) =
 
     desugarMethod m@(Method {mbody, mlocals}) =
       m{mbody = desugarExpr mbody
-       ,mlocals = map desugarFunction mlocals}
+       ,mlocals = map desugarFunction mlocals ++ concat (map desugarDefaultParameters mlocals)}
 
     -- NOTE:
     -- `selfSugar` should always be the first desugaring to run.
@@ -174,7 +174,6 @@ desugarProgram p@(Program{traits, classes, functions}) =
     desugarExpr = extend removeDeadMiniLet .
                   extend desugar .
                   extend optionalAccess .
-                --  extend (desugarDefaultParametersCall p).
                   extend selfSugar
 
 -- | Desugars the notation `x?.foo()` and `actor?!bar()` into
