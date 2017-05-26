@@ -7,6 +7,7 @@ import AST.PrettyPrinter
 import AST.Util
 import Types
 import Text.Megaparsec
+import Data.Maybe
 
 import qualified Data.List as List
 
@@ -14,7 +15,7 @@ desugarProgram :: Program -> Program
 desugarProgram p@(Program{traits, classes, functions}) =
   p{
     traits = map desugarTrait traits,
-    classes = map desugarClass  classes,
+    classes = map (desugarClass . desugarClassParams) classes,
     functions = map desugarFunction functions
   }
   where
@@ -61,12 +62,23 @@ desugarProgram p@(Program{traits, classes, functions}) =
     desugarClass c@(Class{cmethods})
       | isPassive c || isShared c = c{cmethods = map desugarMethod cmethods}
 
-    desugarClassParam c@(Class{cmethods, cfields}) = c{cmethods = map (\e-> (desugarClassParams e c)) (cmethods)}
+      -- Desugar default paramater fields into assignments in the construcor
+    desugarClassParams c@(Class{cmethods, cfields}) = c{cmethods = map (desugarClassParamsMethod c) cmethods}
 
-    -- TODO: this method should append default field values at the begining of the constructor method
-    desugarClassParams m@(Method {mbody, mlocals}) c@(Class{cmethods, cfields}) | isConstructor m = m
+    desugarClassParamsMethod  c@(Class{cmeta, cmethods, cfields}) m@(Method {mbody, mlocals})
+      | isConstructor m = m{mbody = Seq{
+          emeta= Meta.meta (Meta.sourcePos cmeta),
+          eseq= (map paramFieldAssignment $ List.filter (isJust . fexpr) cfields) ++ [mbody]
+        }}
+        where
+          paramFieldAssignment field = Assign {emeta=Meta.meta . Meta.sourcePos . fmeta $ field
+                                      ,rhs=fromJust . fexpr $ field
+                                      ,lhs=FieldAccess{emeta=Meta.meta. Meta.sourcePos . fmeta $ field
+                                                      ,name=(fname field)
+                                                      ,target=VarAccess {emeta=Meta.meta . Meta.sourcePos . fmeta $ field
+                                                                        ,qname=qName "this"}}}
+    desugarClassParamsMethod _ m = m
 
-    desugarClassParams m@(Method {mbody, mlocals}) c@(Class{cmethods, cfields}) = m
 
     desugarMethod m@(Method {mbody, mlocals}) =
       m{mbody = desugarExpr mbody
