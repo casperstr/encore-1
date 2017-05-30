@@ -13,18 +13,18 @@ active class Tester
 
   def foo(a: int, b:Tester2 = new Tester2("b"), c:int = 0) : unit
     println(a)
-    b!bar()
+    println(b.bar())
     println(c)
   end
 end
 
-active class Tester2
+local class Tester2
   var b : String
   def init(b: String) : unit
     this.b = b
   end
 
-  def bar() : unit
-    println(this.b)
+  def bar() : String
+    this.b
   end
 end
