@@ -663,26 +663,17 @@ instance Translatable A.Expr (State Ctx.Context (CCode Lval, CCode Stat)) where
                          result <- Ctx.genNamedSym (fromJust sym)
                          return (Var result, Assign (Decl (translate retTy, Var result)))
 
-  translate w@(A.DoWhile {A.cond, A.body}) =
-      do (ncond,tcond) <- translate cond
-         (nbody,tbody) <- translate body
-         tmp <- Ctx.genNamedSym "while";
-         let exportBody = Seq $ tbody : [Assign (Var tmp) nbody]
-         return (Var tmp,
-                 Seq [Statement $ Decl (translate (A.getType w), Var tmp),
-                      DoWhile (StatAsExpr ncond tcond) (Statement exportBody)])
+  translate w@(A.DoWhile {A.cond, A.body}) = do
+    (ncond,tcond) <- translate cond
+    (_,tbody) <- translate body
+    return (unit, DoWhile (StatAsExpr ncond tcond) (Statement tbody))
 
-  translate w@(A.While {A.cond, A.body}) =
-      do (ncond,tcond) <- translate cond
-         (nbody,tbody) <- translate body
-         tmp <- Ctx.genNamedSym "while";
-         let exportBody = Seq $ tbody : [Assign (Var tmp) nbody]
-         return (Var tmp,
-                 Seq [Statement $ Decl (translate (A.getType w), Var tmp),
-                      While (StatAsExpr ncond tcond) (Statement exportBody)])
+  translate w@(A.While {A.cond, A.body}) = do
+    (ncond,tcond) <- translate cond
+    (_,tbody) <- translate body
+    return (unit, While (StatAsExpr ncond tcond) (Statement tbody))
 
   translate for@(A.For {A.name, A.step, A.src, A.body}) = do
-    tmpVar   <- Var <$> Ctx.genNamedSym "for";
     indexVar <- Var <$> Ctx.genNamedSym "index"
     eltVar   <- Var <$> Ctx.genNamedSym (show name)
     startVar <- Var <$> Ctx.genNamedSym "start"
@@ -736,12 +727,10 @@ instance Translatable A.Expr (State Ctx.Context (CCode Lval, CCode Stat)) where
                    then AsExpr indexVar
                    else AsExpr $ fromEncoreArgT eltType (Call arrayGet [srcN, indexVar]))
         inc = Assign indexVar (BinOp (translate ID.PLUS) indexVar stepVar)
-        theBody = Seq [eltDecl, Statement bodyT, Assign tmpVar bodyN, inc]
+        theBody = Seq [eltDecl, Statement bodyT, inc]
         theLoop = While cond theBody
-        tmpDecl  = Statement $ Decl (translate (A.getType for), tmpVar)
 
-    return (tmpVar, Seq [tmpDecl
-                        ,srcT
+    return (unit, Seq [srcT
                         ,srcStartT
                         ,srcStopT
                         ,srcStepT
@@ -774,7 +763,7 @@ instance Translatable A.Expr (State Ctx.Context (CCode Lval, CCode Stat)) where
          (narg, targ) <- translate arg
          let argty = A.getType arg
              mType = translate (A.getType m)
-         tIfChain <- ifChain clauses narg argty retTmp mType
+         tIfChain <- ifChain clauses narg argty retTmp mType (A.getPos m)
          let lRetDecl = Decl (mType, Var retTmp)
              eZeroInit = Cast mType (Int 0)
              tRetDecl = Assign lRetDecl eZeroInit
@@ -941,18 +930,18 @@ instance Translatable A.Expr (State Ctx.Context (CCode Lval, CCode Stat)) where
               tAssign = Assign (Var handlerReturnVar) eCast
           return tAssign
 
-        ifChain [] _ _ _ _ = do
+        ifChain [] _ _ _ _ pos = do
           let errorCode = Int 1
               exitCall = Statement $ Call (Nam "exit") [errorCode]
-              errorMsg = String "*** Runtime error: No matching clause was found ***\n"
+              errorMsg = String $ "*** Runtime error: No matching clause was found at " ++ show pos ++ " ***\n"
               errorPrint = Statement $ Call (Nam "fprintf") [AsExpr C.stderr, errorMsg]
           return $ Seq [errorPrint, exitCall]
 
-        ifChain (clause:rest) narg argty retTmp retTy = do
+        ifChain (clause:rest) narg argty retTmp retTy pos = do
           let freeVars = Util.foldrExp (\e a -> getExprVars e ++ a) [] (A.mcpattern clause)
           assocs <- mapM createAssoc freeVars
           thenExpr <- translateHandler clause retTmp assocs retTy
-          elseExpr <- ifChain rest narg argty retTmp retTy
+          elseExpr <- ifChain rest narg argty retTmp retTy pos
           eCond <- translateIfCond clause narg argty assocs
           let tIf = Statement $ If eCond thenExpr elseExpr
               tDecls = Seq $ map (fwdDecl assocs) freeVars
@@ -1015,18 +1004,10 @@ instance Translatable A.Expr (State Ctx.Context (CCode Lval, CCode Stat)) where
                                                        ,A.name
                                                        ,A.typeArguments
                                                        ,A.args}} = do
-    withForwarding <- gets Ctx.withForwarding
+    isAsyncForward <- gets Ctx.isAsyncForward
     eCtx <- gets Ctx.getExecCtx
-    let dtraceExit =
-          case eCtx of
-            Ctx.FunctionContext fun ->
-              dtraceFunctionExit (A.functionName fun)
-            Ctx.MethodContext mdecl ->
-              dtraceMethodExit thisVar (A.methodName mdecl)
-            Ctx.ClosureContext clos ->
-              dtraceClosureExit
-            _ -> error "Expr.hs: No context to forward from"
-    if withForwarding
+    let dtraceExit = getDtraceExit eCtx
+    if isAsyncForward
     then do
       (ntarget, ttarget) <- translate target
       let targetType = A.getType target
@@ -1049,8 +1030,7 @@ instance Translatable A.Expr (State Ctx.Context (CCode Lval, CCode Stat)) where
                        dtraceExit,
                        Return Skip])
 
-    else if Ty.isFutureType $ A.getType expr
-    then do
+    else do
       (sendn, sendt) <- translate A.MessageSend{A.emeta
                                                ,A.target
                                                ,A.name
@@ -1059,14 +1039,39 @@ instance Translatable A.Expr (State Ctx.Context (CCode Lval, CCode Stat)) where
       let resultType = translate (Ty.getResultType $ A.getType expr)
           theGet = fromEncoreArgT resultType (Call futureGetActor [encoreCtxVar, sendn])
       return (unit, Seq [sendt, dtraceExit, Return theGet])
-    else
-      error $ "Expr.hs: Cannot translate forward of ''" ++ show expr ++ "'"
 
-  translate A.Forward{A.forwardExpr = A.FutureChain{}} =
-    error "Expr.hs: Forwarding of chaining not implemented"
-  translate A.Forward{A.forwardExpr} =
-    error $ "Expr.hs: Target of forward is not method call or future chain: '" ++
-            show forwardExpr ++ "'"
+  translate A.Forward{A.emeta, A.forwardExpr = fchain@A.FutureChain{A.future, A.chain}} = do
+    (nfuture,tfuture) <- translate future
+    (nchain, tchain)  <- translate chain
+    eCtx <- gets $ Ctx.getExecCtx
+    isAsyncForward <- gets Ctx.isAsyncForward
+    let ty = getRuntimeType chain
+        dtraceExit = getDtraceExit eCtx
+    if isAsyncForward
+    then do
+      return (unit, Seq $
+                      [tfuture,
+                       tchain,
+                       (Statement $
+                          Call futureChainActorForward
+                           [AsExpr encoreCtxVar, AsExpr nfuture, ty, AsExpr nchain, AsExpr futVar]
+                       )] ++
+                      [dtraceExit,
+                      Return Skip])
+    else do
+      tmp <- Ctx.genSym
+      result <- Ctx.genSym
+      let nfchain = Var result
+          resultType = translate (Ty.getResultType $ A.getType fchain)
+          theGet = fromEncoreArgT resultType (Call futureGetActor [encoreCtxVar, nfchain])
+      return $ (Var tmp, Seq $
+                      [tfuture,
+                       tchain,
+                       (Assign (Decl (C.future, Var result))
+                               (Call futureChainActor
+                                 [AsExpr encoreCtxVar, AsExpr nfuture, ty, AsExpr nchain]
+                               )),
+                       Assign (Decl (resultType, Var tmp)) theGet])
 
   translate yield@(A.Yield{A.val}) =
       do (nval, tval) <- translate val
@@ -1186,6 +1191,16 @@ instance Translatable A.Expr (State Ctx.Context (CCode Lval, CCode Stat)) where
       Nothing -> functionCall fcall
 
   translate other = error $ "Expr.hs: can't translate: '" ++ show other ++ "'"
+
+getDtraceExit eCtx =
+  case eCtx of
+    Ctx.FunctionContext fun ->
+      dtraceFunctionExit (A.functionName fun)
+    Ctx.MethodContext mdecl ->
+      dtraceMethodExit thisVar (A.methodName mdecl)
+    Ctx.ClosureContext clos ->
+      dtraceClosureExit
+    _ -> error "Expr.hs: No context to forward from"
 
 closureCall :: CCode Lval -> A.Expr ->
   State Ctx.Context (CCode Lval, CCode Stat)

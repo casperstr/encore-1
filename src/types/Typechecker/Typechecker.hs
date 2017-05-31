@@ -220,6 +220,9 @@ meetRequiredFields cFields trait = do
         isSub <- cFieldType `subtypeOf` expected
         unless (cFieldType == expected) $
             tcError $ RequiredFieldMismatchError cField expected trait isSub
+        when (isVarField expField) $
+             unless (isVarField cField) $
+                 tcError $ RequiredFieldMutabilityError trait cField
 
 noOverlapFields :: Type -> Maybe TraitComposition -> TypecheckM ()
 noOverlapFields cname composition =
@@ -703,7 +706,12 @@ instance Checkable Expr where
 
             calledName <- matchArgumentLength targetType header (args mcall)
 
-            let eTarget' = setType calledType eTarget
+            isActive <- isActiveType targetType
+            let eTarget' = if isThisAccess eTarget &&
+                              isActive && isMethodCall mcall
+                           then setType (makeLocal calledType) eTarget
+                           else setType calledType eTarget
+
                 typeParams = htypeparams header
                 argTypes = map ptype $ take (length (args mcall)) (hparams header)
                 resultType = htype header
@@ -1247,8 +1255,6 @@ instance Checkable Expr where
     doTypecheck forward@(Forward {forwardExpr}) =
         do eExpr <- typecheck forwardExpr
            let ty = AST.getType eExpr
-           unless (isMessageSend forwardExpr) $
-                  pushError eExpr $ ForwardArgumentError
            unless (isFutureType ty) $
                   pushError eExpr $ ExpectingOtherTypeError
                                       "a future" ty
@@ -1388,13 +1394,18 @@ instance Checkable Expr where
     doTypecheck fAcc@(FieldAccess {target, name}) = do
       eTarget <- typecheck target
       let targetType = AST.getType eTarget
+      isActive <- isActiveType targetType
+      let accessedType = if isThisAccess eTarget && isActive
+                         then makeLocal targetType
+                         else targetType
+          eTarget' = setType accessedType eTarget
       unless (isThisAccess target ||
               isPassiveClassType targetType && not (isModeless targetType)) $
         tcError $ CannotReadFieldError eTarget
       fdecl <- findField targetType name
       let ty = ftype fdecl
       checkFieldEncapsulation name eTarget ty
-      return $ setType ty fAcc {target = eTarget}
+      return $ setType ty fAcc {target = eTarget'}
 
     --  E |- lhs : t
     --  isLval(lhs)
@@ -1918,7 +1929,7 @@ checkSubordinateReturn name returnType targetType = do
   targetIsEncaps <- isEncapsulatedType targetType
   when subordReturn $
        unless targetIsEncaps $
-              tcError $ SubordinateReturnError name
+              tcError $ SubordinateReturnError name returnType
 
 checkSubordinateArgs :: [Expr] -> Type -> TypecheckM ()
 checkSubordinateArgs args targetType = do
@@ -1965,7 +1976,7 @@ checkLocalReturn name returnType targetType =
   when (isActiveSingleType targetType) $ do
     localReturn <- isLocalType returnType
     when localReturn $
-       tcError $ ThreadLocalReturnError name
+       tcError $ ThreadLocalReturnError name returnType
     let nonSharable =
           find nonSharableTypeVar $ typeComponents returnType
     when (isJust nonSharable) $
