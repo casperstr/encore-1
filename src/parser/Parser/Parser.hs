@@ -794,7 +794,7 @@ mutModifier = (reserved "var" >> return Var)
 
 
 fieldDecl :: EncParser FieldDecl
-fieldDecl = do 
+fieldDecl = do
   fmeta <- buildMeta
   fmut  <- mutModifier
   fname <- Name <$> identifier
@@ -802,7 +802,7 @@ fieldDecl = do
   ftype <- typ
   optional $ withLinebreaks $ reservedOp "="
   fexpr <- optional expression
-  returnWithEnd Field{fmeta, fmut, fname, ftypr, fexpr}
+  returnWithEnd Field{fmeta, fmut, fname, ftype, fexpr}
 
 
 paramDecl :: EncParser ParamDecl
