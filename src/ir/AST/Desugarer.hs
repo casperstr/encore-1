@@ -12,11 +12,6 @@ import Debug.Trace
 import qualified Data.List as List
 
 
-nameForArg :: Int -> String
-nameForArg 0 = ""
-nameForArg x = show x
-
-
 createFunction :: Function -> [Expr] -> Function
 createFunction func@(Function{funheader}) defaultParams =
   func{funheader=Header{
