@@ -8,7 +8,6 @@ import AST.Util
 import Types
 import Text.Megaparsec
 import Data.Maybe
-import Debug.Trace
 import qualified Data.List as List
 
 
