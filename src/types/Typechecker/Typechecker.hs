@@ -1433,7 +1433,7 @@ instance Checkable Expr where
                        tcError $ ValFieldAssignmentError name targetType
               | otherwise = return ()
 
--- Karro
+
     doTypecheck fun@(FunctionAsValue {qname, typeArgs}) = do
          result <- findVar qname
          case result of
