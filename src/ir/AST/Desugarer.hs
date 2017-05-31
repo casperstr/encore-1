@@ -27,12 +27,12 @@ createFunction func@(Function{funheader}) defaultParams =
         htype= htype funheader,
         hparams= params
     },
-    funbody=Return {emeta= Meta.meta $ Meta.sourcePos $ funmeta func,
+    funbody=Return {emeta= Meta.meta $ Meta.getPos $ funmeta func,
                     val= FunctionCall{
-      emeta=Meta.meta $ Meta.sourcePos $ funmeta func,
+      emeta=Meta.meta $ Meta.getPos $ funmeta func,
       typeArguments=htypeparams funheader,
       qname= qName $ show $ hname funheader,
-      args= map (\e -> VarAccess{emeta =  Meta.meta $ Meta.sourcePos $ pmeta e, qname = qName $ show $ pname e}) params ++ defaultParams
+      args= map (\e -> VarAccess{emeta =  Meta.meta $ Meta.getPos $ pmeta e, qname = qName $ show $ pname e}) params ++ defaultParams
     }}
   }
   where
@@ -62,13 +62,13 @@ createMethod meth@(Method{mheader, mmeta}) defaultParams =
         htype= htype mheader,
         hparams= params
     },
-    mbody=Return {emeta= Meta.meta $ Meta.sourcePos $ mmeta,
+    mbody=Return {emeta= Meta.meta $ Meta.getPos $ mmeta,
                     val= MethodCall{
-      emeta=Meta.meta $ Meta.sourcePos $ mmeta,
-      target=VarAccess {emeta=Meta.meta $ Meta.sourcePos $ mmeta, qname=qName "this"},
+      emeta=Meta.meta $ Meta.getPos $ mmeta,
+      target=VarAccess {emeta=Meta.meta $ Meta.getPos $ mmeta, qname=qName "this"},
       typeArguments=htypeparams mheader,
       name= hname mheader,
-      args= map (\e -> VarAccess{emeta =  Meta.meta $ Meta.sourcePos $ pmeta e, qname = qName $ show $ pname e}) params ++ defaultParams
+      args= map (\e -> VarAccess{emeta =  Meta.meta $ Meta.getPos $ pmeta e, qname = qName $ show $ pname e}) params ++ defaultParams
     }}
 
   }
@@ -146,19 +146,22 @@ desugarProgram p@(Program{traits, classes, functions}) =
       | isPassive c || isShared c = c{cmethods = map desugarMethod cmethods}
 
       -- Desugar default Parameter fields into assignments in the construcor
-    desugarClassParams c@(Class{cmethods, cfields}) = c{cmethods = map (desugarClassParamsMethod c) cmethods}
+    desugarClassParams c@(Class{cmethods, cfields}) = c{cmethods = map (desugarClassParamsMethod c) (cmethods ++ createConstructor c)}
+
+    createConstructor c = if hasConstructor c then []
+      else [emptyConstructor c]
 
     desugarClassParamsMethod  c@(Class{cmeta, cmethods, cfields}) m@(Method {mbody, mlocals})
       | isConstructor m = m{mbody = Seq{
-          emeta= Meta.meta (Meta.sourcePos cmeta),
+          emeta= Meta.meta (Meta.getPos cmeta),
           eseq= (map paramFieldAssignment $ List.filter (isJust . fexpr) cfields) ++ [mbody]
         }}
         where
-          paramFieldAssignment field = Assign {emeta=Meta.meta . Meta.sourcePos . fmeta $ field
+          paramFieldAssignment field = Assign {emeta=Meta.meta . Meta.getPos . fmeta $ field
                                       ,rhs=fromJust . fexpr $ field
-                                      ,lhs=FieldAccess{emeta=Meta.meta. Meta.sourcePos . fmeta $ field
+                                      ,lhs=FieldAccess{emeta=Meta.meta. Meta.getPos . fmeta $ field
                                                       ,name=(fname field)
-                                                      ,target=VarAccess {emeta=Meta.meta . Meta.sourcePos . fmeta $ field
+                                                      ,target=VarAccess {emeta=Meta.meta . Meta.getPos . fmeta $ field
                                                                         ,qname=qName "this"}}}
     desugarClassParamsMethod _ m = m
 
