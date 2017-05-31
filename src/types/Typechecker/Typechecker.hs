@@ -182,14 +182,23 @@ instance Checkable FieldDecl where
     return f
 
 
-matchArgumentLength :: Type -> FunctionHeader -> Arguments -> TypecheckM ()
+matchArgumentLength :: Type -> FunctionHeader -> Arguments -> TypecheckM Name
 matchArgumentLength targetType header args =
-  unless (actual == expected) $
-         tcError $ WrongNumberOfMethodArgumentsError
-                   (hname header) targetType expected actual
+      if (actual == expected)
+        then return name
+        else
+          do
+          result <- asks $ methodLookup targetType defName
+          case result of
+            Just header' -> return defName
+            Nothing -> tcError $ WrongNumberOfMethodArgumentsError
+              (hname header) targetType expected actual
   where
+    name = hname header
+    defName = Name ("_" ++ show(name) ++ show (expected - actual))
     actual = length args
     expected = length (hparams header)
+
 
 meetRequiredFields :: [FieldDecl] -> Type -> TypecheckM ()
 meetRequiredFields cFields trait = do
@@ -211,6 +220,9 @@ meetRequiredFields cFields trait = do
         isSub <- cFieldType `subtypeOf` expected
         unless (cFieldType == expected) $
             tcError $ RequiredFieldMismatchError cField expected trait isSub
+        when (isVarField expField) $
+             unless (isVarField cField) $
+                 tcError $ RequiredFieldMutabilityError trait cField
 
 noOverlapFields :: Type -> Maybe TraitComposition -> TypecheckM ()
 noOverlapFields cname composition =
@@ -692,10 +704,16 @@ instance Checkable Expr where
 
             (header, calledType) <- findMethodWithCalledType targetType (name mcall)
 
-            matchArgumentLength targetType header (args mcall)
-            let eTarget' = setType calledType eTarget
+            calledName <- matchArgumentLength targetType header (args mcall)
+
+            isActive <- isActiveType targetType
+            let eTarget' = if isThisAccess eTarget &&
+                              isActive && isMethodCall mcall
+                           then setType (makeLocal calledType) eTarget
+                           else setType calledType eTarget
+
                 typeParams = htypeparams header
-                argTypes = map ptype $ hparams header
+                argTypes = map ptype $ take (length (args mcall)) (hparams header)
                 resultType = htype header
 
             (eArgs, resultType', typeArgs) <-
@@ -718,7 +736,8 @@ instance Checkable Expr where
             return $ setArrowType (arrowType argTypes resultType) $
                      setType returnType' mcall {target = eTarget'
                                               ,args = eArgs
-                                              ,typeArguments = typeArgs}
+                                              ,typeArguments = typeArgs
+                                              ,name = calledName }
 
           errorInitMethod targetType name = do
             when (name == constructorName) $ tcError ConstructorCallError
@@ -792,24 +811,34 @@ instance Checkable Expr where
         let typeParams  = getTypeParameters ty
             argTypes    = getArgTypes ty
             resultType  = getResultType ty
+            actualLength = length args
+            expectedLength = length argTypes
+            defName = qname'{qnlocal = Name $ "_" ++ show qname ++ show (expectedLength - actualLength)}
+
+        calledName <-
+          if (actualLength == expectedLength)
+            then return qname'
+            else do
+              result2 <- findVar defName
+              case result2 of
+                Just (qname2, ty2) -> return defName
+                Nothing -> tcError $ WrongNumberOfFunctionArgumentsError
+                            qname (length argTypes) (length args)
 
         unless (isArrowType ty) $
           tcError $ NonFunctionTypeError ty
-        unless (length args == length argTypes) $
-          tcError $ WrongNumberOfFunctionArgumentsError
-                      qname (length argTypes) (length args)
 
         (eArgs, returnType, typeArgs) <-
           if null typeArguments
-          then inferenceCall fcall typeParams argTypes resultType
+          then inferenceCall fcall typeParams (take actualLength argTypes) resultType
           else do
             unless (length typeArguments == length typeParams) $
                    tcError $ WrongNumberOfFunctionTypeArgumentsError qname
                              (length typeParams) (length typeArguments)
-            typecheckCall fcall typeParams argTypes resultType
+            typecheckCall fcall typeParams (take actualLength argTypes) resultType
         return $ setArrowType ty $
                  setType returnType fcall {args = eArgs,
-                                           qname = qname',
+                                           qname = calledName,
                                            typeArguments = typeArgs}
 
    ---  |- t1 .. |- tn
@@ -1226,8 +1255,6 @@ instance Checkable Expr where
     doTypecheck forward@(Forward {forwardExpr}) =
         do eExpr <- typecheck forwardExpr
            let ty = AST.getType eExpr
-           unless (isMessageSend forwardExpr) $
-                  pushError eExpr $ ForwardArgumentError
            unless (isFutureType ty) $
                   pushError eExpr $ ExpectingOtherTypeError
                                       "a future" ty
@@ -1367,13 +1394,18 @@ instance Checkable Expr where
     doTypecheck fAcc@(FieldAccess {target, name}) = do
       eTarget <- typecheck target
       let targetType = AST.getType eTarget
+      isActive <- isActiveType targetType
+      let accessedType = if isThisAccess eTarget && isActive
+                         then makeLocal targetType
+                         else targetType
+          eTarget' = setType accessedType eTarget
       unless (isThisAccess target ||
               isPassiveClassType targetType && not (isModeless targetType)) $
         tcError $ CannotReadFieldError eTarget
       fdecl <- findField targetType name
       let ty = ftype fdecl
       checkFieldEncapsulation name eTarget ty
-      return $ setType ty fAcc {target = eTarget}
+      return $ setType ty fAcc {target = eTarget'}
 
     --  E |- lhs : t
     --  isLval(lhs)
@@ -1897,7 +1929,7 @@ checkSubordinateReturn name returnType targetType = do
   targetIsEncaps <- isEncapsulatedType targetType
   when subordReturn $
        unless targetIsEncaps $
-              tcError $ SubordinateReturnError name
+              tcError $ SubordinateReturnError name returnType
 
 checkSubordinateArgs :: [Expr] -> Type -> TypecheckM ()
 checkSubordinateArgs args targetType = do
@@ -1944,7 +1976,7 @@ checkLocalReturn name returnType targetType =
   when (isActiveSingleType targetType) $ do
     localReturn <- isLocalType returnType
     when localReturn $
-       tcError $ ThreadLocalReturnError name
+       tcError $ ThreadLocalReturnError name returnType
     let nonSharable =
           find nonSharableTypeVar $ typeComponents returnType
     when (isJust nonSharable) $
